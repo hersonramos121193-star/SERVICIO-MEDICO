@@ -786,17 +786,21 @@ async function guardarIncapacidad(){
     IMSS: document.getElementById('incapIMSS').value
   });
   if(!registro.Nombre){ alert('Captura al menos el nombre del empleado.'); return; }
+  if(registro.Folio && incapacidades.some(x=>x.Folio===registro.Folio && x.ID!==registro.ID)){
+    alert(`Ya existe una incapacidad registrada con el folio "${registro.Folio}". No se guardó el duplicado.`);
+    return;
+  }
   const idx = incapacidades.findIndex(x=>x.ID===registro.ID);
   if(idx>-1) incapacidades[idx]=registro; else incapacidades.push(registro);
-  await apiPost({accion:'upsertIncapacidad', registro});
   cerrarModal('modalIncapacidad');
   refrescarTodaLaUI();
+  await apiPost({accion:'upsertIncapacidad', registro});
 }
 async function eliminarIncapacidad(id){
   if(!confirm('¿Eliminar este registro de incapacidad?')) return;
   incapacidades = incapacidades.filter(x=>x.ID!==id);
-  await apiPost({accion:'eliminarIncapacidad', id});
   refrescarTodaLaUI();
+  await apiPost({accion:'eliminarIncapacidad', id});
 }
 
 /* ============================================================
@@ -865,15 +869,15 @@ async function guardarEmpleado(){
   if(!registro.Codigo || !registro.Nombre){ alert('Código y nombre son obligatorios.'); return; }
   const idx = empleados.findIndex(x=>x.Codigo===codigoOriginal);
   if(idx>-1) empleados[idx]=registro; else empleados.push(registro);
-  await apiPost({accion:'upsertEmpleado', registro});
   cerrarModal('modalEmpleado');
   refrescarTodaLaUI();
+  await apiPost({accion:'upsertEmpleado', registro});
 }
 async function eliminarEmpleado(codigo){
   if(!confirm('¿Eliminar este empleado del catálogo?')) return;
   empleados = empleados.filter(x=>x.Codigo!==codigo);
-  await apiPost({accion:'eliminarEmpleado', codigo});
   refrescarTodaLaUI();
+  await apiPost({accion:'eliminarEmpleado', codigo});
 }
 
 /* ============================================================
@@ -1021,18 +1025,35 @@ async function cargarCatalogoEmpleados(evento){
   }
 }
 
+function filtrarDuplicadosPorFolio(registros, listaExistente){
+  const vistos = new Set(listaExistente.filter(x=>x.Folio).map(x=>x.Folio));
+  const validos = [];
+  const duplicados = [];
+  registros.forEach(r=>{
+    if(r.Folio && vistos.has(r.Folio)){
+      duplicados.push(r.Folio);
+    } else {
+      if(r.Folio) vistos.add(r.Folio);
+      validos.push(r);
+    }
+  });
+  return {validos, duplicados};
+}
+
 async function confirmarModoCarga(modo){
   if(!cargaPendiente) return;
   const {tipo, registros} = cargaPendiente;
   if(tipo==='incapacidades'){
-    if(modo==='reemplazar') incapacidades = registros;
+    const listaExistente = modo==='reemplazar' ? [] : incapacidades;
+    const {validos, duplicados} = filtrarDuplicadosPorFolio(registros, listaExistente);
+    if(modo==='reemplazar') incapacidades = validos;
     else{
-      registros.forEach(r=>{
-        const idx = incapacidades.findIndex(x=>x.Folio && x.Folio===r.Folio);
-        if(idx>-1) incapacidades[idx]=r; else incapacidades.push(r);
-      });
+      validos.forEach(r=>{ incapacidades.push(r); });
     }
-    await apiPost({accion:'guardarIncapacidades', registros: modo==='reemplazar'?registros:incapacidades, modo:'reemplazar'});
+    if(duplicados.length){
+      alert(`Se detectaron ${duplicados.length} folio(s) duplicado(s) y NO se registraron:\n${duplicados.join(', ')}`);
+    }
+    await apiPost({accion:'guardarIncapacidades', registros: modo==='reemplazar'?incapacidades:incapacidades, modo:'reemplazar'});
   } else {
     if(modo==='reemplazar') empleados = registros;
     else{
