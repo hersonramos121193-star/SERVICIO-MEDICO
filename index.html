@@ -171,6 +171,8 @@
       <button class="btn" onclick="abrirModalEmpleado()">+ Agregar empleado</button>
       <button class="btn secundario" onclick="document.getElementById('archivoEmpleados').click()">⬆ Subir / actualizar catálogo</button>
       <input type="file" id="archivoEmpleados" class="oculto" accept=".xls,.xlsx,.csv" onchange="cargarCatalogoEmpleados(event)">
+      <button class="btn secundario" onclick="document.getElementById('archivoZonas').click()">🗺 Actualizar tabla Depto→Área</button>
+      <input type="file" id="archivoZonas" class="oculto" accept=".xls,.xlsx" onchange="actualizarTablaDeptoArea(event)">
       <button class="btn secundario" onclick="exportarEmpleadosXlsx()">⬇ Exportar Excel</button>
     </div>
     <input type="text" id="buscarEmp" placeholder="Buscar empleado..." style="width:260px;" oninput="renderTablaEmpleados()">
@@ -183,7 +185,7 @@
   <div class="tabla-scroll">
     <table>
       <thead><tr>
-        <th>Código</th><th>Nombre</th><th>Puesto</th><th>Planta</th><th>NSS</th><th>Teléfono</th><th>Ingreso</th><th>Estatus</th><th></th>
+        <th>Código</th><th>Nombre</th><th>Puesto</th><th>Depto</th><th>Área</th><th>NSS</th><th>Teléfono</th><th>Ingreso</th><th>Estatus</th><th></th>
       </tr></thead>
       <tbody id="tbodyEmpleados"></tbody>
     </table>
@@ -248,8 +250,9 @@
     </div>
     <div class="fila-modal">
       <div class="campo"><label>Puesto</label><input type="text" id="empPuesto"></div>
-      <div class="campo"><label>Planta</label><input type="text" id="empPlanta"></div>
+      <div class="campo"><label>Depto (código nómina)</label><input type="text" id="empDepto" oninput="previsualizarAreaEmpleado()"></div>
     </div>
+    <div class="campo"><label>Área (calculada automáticamente)</label><input type="text" id="empPlanta" readonly style="background:#f2f4f8;"></div>
     <div class="fila-modal">
       <div class="campo"><label>NSS</label><input type="text" id="empNSS"></div>
       <div class="campo"><label>Teléfono</label><input type="text" id="empTelefono"></div>
@@ -371,8 +374,10 @@ function normalizarIncap(r){
   };
 }
 function normalizarEmp(r){
+  const depto = String(r.Depto||'').trim();
   return {
-    Codigo: String(r.Codigo||''), Nombre: r.Nombre||'', Puesto: r.Puesto||'', Planta: r.Planta||'',
+    Codigo: String(r.Codigo||''), Nombre: r.Nombre||'', Puesto: r.Puesto||'',
+    Depto: depto, Planta: mapearArea(depto) || r.Planta || '',
     NSS: r.NSS||'', Telefono: r.Telefono||'', FechaIngreso: aFechaISO(r.FechaIngreso),
     Estatus: r.Estatus||'Activo', Notas: r.Notas||''
   };
@@ -469,8 +474,46 @@ const MAPA_DEPTO_AREA = {
 };
 function mapearArea(deptoRaw){
   const cod = String(deptoRaw||'').trim().replace(/^0+/,'');
+  if(!cod) return '';
   if(MAPA_DEPTO_AREA[cod]) return MAPA_DEPTO_AREA[cod];
-  return deptoRaw || '';
+  return '';
+}
+function cargarMapaDeptoAreaGuardado(){
+  const guardado = localStorage.getItem('mapaDeptoArea');
+  if(guardado){
+    try{ Object.assign(MAPA_DEPTO_AREA, JSON.parse(guardado)); }catch(e){}
+  }
+}
+async function actualizarTablaDeptoArea(evento){
+  const file = evento.target.files[0];
+  if(!file) return;
+  try{
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(new Uint8Array(buf), {type:'array'});
+    const hoja = wb.Sheets[wb.SheetNames[0]];
+    const filas = XLSX.utils.sheet_to_json(hoja, {header:1, defval:''});
+    const nuevoMapa = {};
+    filas.forEach(fila=>{
+      const depto = fila[0];
+      const area = fila[2]; // columna C = AREA según tu catálogo
+      if(depto!=='' && !isNaN(depto) && area){
+        nuevoMapa[String(depto).trim()] = String(area).trim();
+      }
+    });
+    if(!Object.keys(nuevoMapa).length){ alert('No se detectaron filas válidas (se espera: columna A = DEPTO NOMINA, columna C = AREA).'); return; }
+    Object.assign(MAPA_DEPTO_AREA, nuevoMapa);
+    localStorage.setItem('mapaDeptoArea', JSON.stringify(MAPA_DEPTO_AREA));
+    // recalcula el área de todo el catálogo actual con la tabla nueva
+    empleados = empleados.map(e => ({...e, Planta: mapearArea(e.Depto) || e.Planta}));
+    await apiPost({accion:'guardarEmpleados', registros: empleados, modo:'reemplazar'});
+    refrescarTodaLaUI();
+    alert(`Tabla depto→área actualizada (${Object.keys(nuevoMapa).length} departamentos). Se recalculó el área de todo el catálogo.`);
+  }catch(err){
+    console.error(err);
+    alert('No se pudo leer el archivo de zonas.');
+  } finally {
+    evento.target.value = '';
+  }
 }
 
 /* ============================================================
@@ -710,19 +753,23 @@ function renderTablaEmpleados(){
 
   tbody.innerHTML = filtrados.map(e => `
     <tr>
-      <td>${e.Codigo}</td><td>${e.Nombre}</td><td>${e.Puesto}</td><td>${e.Planta}</td>
+      <td>${e.Codigo}</td><td>${e.Nombre}</td><td>${e.Puesto}</td><td>${e.Depto}</td><td>${e.Planta}</td>
       <td>${e.NSS}</td><td>${e.Telefono}</td><td>${e.FechaIngreso}</td>
       <td><span class="badge ${e.Estatus==='Activo'?'activa':'cerrada'}">${e.Estatus}</span></td>
       <td>
         <button class="btn chico secundario" onclick="editarEmpleado('${e.Codigo}')">✎</button>
         <button class="btn chico peligro" onclick="eliminarEmpleado('${e.Codigo}')">✕</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="9" style="text-align:center;color:#8892a0;">Sin registros</td></tr>';
+    </tr>`).join('') || '<tr><td colspan="10" style="text-align:center;color:#8892a0;">Sin registros</td></tr>';
 }
 
+function previsualizarAreaEmpleado(){
+  const depto = document.getElementById('empDepto').value;
+  document.getElementById('empPlanta').value = mapearArea(depto) || '(código de depto no reconocido)';
+}
 function abrirModalEmpleado(){
   document.getElementById('tituloModalEmp').textContent = 'Agregar empleado';
-  ['empCodigoOriginal','empCodigo','empNombre','empPuesto','empPlanta','empNSS','empTelefono','empFechaIngreso','empNotas']
+  ['empCodigoOriginal','empCodigo','empNombre','empPuesto','empDepto','empPlanta','empNSS','empTelefono','empFechaIngreso','empNotas']
     .forEach(id=>document.getElementById(id).value='');
   document.getElementById('empEstatus').value='Activo';
   abrirModal('modalEmpleado');
@@ -735,6 +782,7 @@ function editarEmpleado(codigo){
   document.getElementById('empCodigo').value = e.Codigo;
   document.getElementById('empNombre').value = e.Nombre;
   document.getElementById('empPuesto').value = e.Puesto;
+  document.getElementById('empDepto').value = e.Depto;
   document.getElementById('empPlanta').value = e.Planta;
   document.getElementById('empNSS').value = e.NSS;
   document.getElementById('empTelefono').value = e.Telefono;
@@ -749,7 +797,7 @@ async function guardarEmpleado(){
     Codigo: document.getElementById('empCodigo').value,
     Nombre: document.getElementById('empNombre').value,
     Puesto: document.getElementById('empPuesto').value,
-    Planta: document.getElementById('empPlanta').value,
+    Depto: document.getElementById('empDepto').value,
     NSS: document.getElementById('empNSS').value,
     Telefono: document.getElementById('empTelefono').value,
     FechaIngreso: document.getElementById('empFechaIngreso').value,
@@ -898,7 +946,7 @@ async function cargarCatalogoEmpleados(evento){
       Codigo: f['Codigo']||f['CODIGO']||f['Código']||f['CVEEMP']||'',
       Nombre: f['Nombre']||f['NOMBRE_COMPLETO']||f['NOMBRE']||'',
       Puesto: f['Puesto']||f['PUESTO']||'',
-      Planta: mapearArea(f['DEPARTAMENTO']) || f['Planta'] || f['Departamento'] || '',
+      Depto: f['Depto']||f['DEPARTAMENTO']||'',
       NSS: f['NSS']||f['IMSS']||f['NOIMSS']||'',
       Telefono: f['Telefono']||f['Teléfono']||f['TELEFONO']||'',
       FechaIngreso: f['FechaIngreso']||f['Fecha Ingreso']||f['FECHAALTA']||'',
@@ -964,6 +1012,7 @@ function exportarEmpleadosXlsx(){
    INICIO
 ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
+  cargarMapaDeptoAreaGuardado();
   if(!urlScript){ document.getElementById('configBox').classList.remove('oculto'); }
   cargarTodo();
 });
