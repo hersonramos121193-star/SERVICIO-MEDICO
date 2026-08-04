@@ -176,8 +176,9 @@
     <input type="text" id="buscarEmp" placeholder="Buscar empleado..." style="width:260px;" oninput="renderTablaEmpleados()">
   </div>
   <div style="font-size:12px;color:#5b6675;margin-bottom:8px;">
-    Columnas esperadas al subir el catálogo: <b>Codigo, Nombre, Puesto, Planta, NSS, Telefono, FechaIngreso, Estatus, Notas</b>.
-    Al subir un archivo puedes elegir "reemplazar todo el catálogo" o "agregar/actualizar por código".
+    Columnas esperadas al subir el catálogo: <b>Codigo, Nombre, Puesto, Planta, NSS, Telefono, FechaIngreso, Estatus, Notas</b>
+    (también reconoce directamente el export de nómina: CODIGO, NOMBRE_COMPLETO, PUESTO, DEPARTAMENTO, NOIMSS, TELEFONO, FECHAALTA, ESTATUS).
+    El campo <b>Planta/Área</b> se recalcula automáticamente a partir del número de departamento de nómina cada vez que subes el catálogo, según la tabla depto→área vigente.
   </div>
   <div class="tabla-scroll">
     <table>
@@ -443,8 +444,69 @@ function poblarDatalistCodigos(){
 }
 
 /* ============================================================
-   DASHBOARD / GRÁFICAS
+   MAPEO DEPARTAMENTO (nómina) -> ÁREA
 ============================================================ */
+const MAPA_DEPTO_AREA = {
+  '1':'PLANTA 1','2':'PLANTA 2','3':'PLANTA 2','4':'PLANTA 1','5':'PLANTA 1',
+  '6':'PLANTA 4','7':'PLANTA 3','8':'CORPORATIVO','9':'PLANTA 3','10':'CORPORATIVO',
+  '11':'PLANTA 5','12':'PLANTA 1','82':'VENTAS','83':'PLANTA 1','84':'PLANTA 1',
+  '85':'VENTAS','86':'VENTAS','87':'VENTAS','88':'VENTAS','89':'VENTAS','90':'VENTAS',
+  '91':'VENTAS','92':'VENTAS','94':'VENTAS','95':'VENTAS','96':'VENTAS','97':'PLANTA 4',
+  '98':'PLANTA 4','99':'PLANTA 4','100':'PLANTA 4','101':'PLANTA 4','102':'PLANTA 4',
+  '103':'PLANTA 4','104':'PLANTA 4','105':'PLANTA 4','106':'PLANTA 4','107':'PLANTA 4',
+  '108':'PLANTA 4','109':'PLANTA 4','110':'PLANTA 4','111':'PLANTA 4','112':'PLANTA 4',
+  '113':'VENTAS PAILERIA','114':'CORPORATIVO','115':'CORPORATIVO','116':'PLANTA 1',
+  '117':'PLANTA 1','118':'PLANTA 1','119':'PLANTA 1','120':'PLANTA 1','121':'PLANTA 1',
+  '122':'PLANTA 2','123':'PLANTA 2','124':'PLANTA 2','125':'PLANTA 2','126':'PLANTA 2',
+  '127':'PLANTA 2','128':'PLANTA 3','129':'PLANTA 3','130':'PLANTA 3','131':'PLANTA 3',
+  '132':'PLANTA 3','133':'PLANTA 3','134':'PLANTA 5','135':'PLANTA 5','136':'PLANTA 5',
+  '137':'PLANTA 5','138':'PLANTA 5','139':'PLANTA 5','140':'PLANTA 2','141':'PLANTA 1',
+  '142':'PLANTA 5','143':'PLANTA 1','144':'PLANTA 2','145':'PLANTA 3','146':'PLANTA 4',
+  '147':'PLANTA 5','148':'PLANTA 5','149':'PLANTA 4','150':'PLANTA 4','151':'PLANTA 1',
+  '152':'PLANTA 2','153':'PLANTA 3','154':'PLANTA 4','155':'PLANTA 5','156':'PLANTA 3',
+  '157':'VENTAS PAILERIA','158':'PLANTA 1','159':'VENTAS','160':'VENTAS','161':'PLANTA 2',
+  '162':'VENTAS PAILERIA','163':'VENTAS PAILERIA','164':'VENTAS PAILERIA'
+};
+function mapearArea(deptoRaw){
+  const cod = String(deptoRaw||'').trim().replace(/^0+/,'');
+  if(MAPA_DEPTO_AREA[cod]) return MAPA_DEPTO_AREA[cod];
+  return deptoRaw || '';
+}
+
+/* ============================================================
+   CASOS REALES (agrupa INICIAL + SUBSECUENTE(s) como 1 solo caso)
+============================================================ */
+function calcularCasos(lista){
+  const porEmpleado = {};
+  lista.forEach(i=>{
+    const clave = i.Codigo || i.Nombre || 'SIN_ID';
+    (porEmpleado[clave] = porEmpleado[clave] || []).push(i);
+  });
+  const casos = [];
+  Object.values(porEmpleado).forEach(registros=>{
+    registros.sort((a,b)=> (a.FechaInicio||'').localeCompare(b.FechaInicio||''));
+    let casoActual = null;
+    registros.forEach(r=>{
+      const esInicial = (r.TipoRegistro||'').toUpperCase() === 'INICIAL';
+      if(esInicial || !casoActual){
+        if(casoActual) casos.push(casoActual);
+        casoActual = {
+          Codigo:r.Codigo, Nombre:r.Nombre, Puesto:r.Puesto, Planta:r.Planta,
+          Incapacidad:r.Incapacidad, FechaInicio:r.FechaInicio, FechaFin:r.FechaFin,
+          Dias:0, Estatus:r.Estatus, registros:[]
+        };
+      }
+      casoActual.Dias += (Number(r.Dias)||0);
+      casoActual.FechaFin = r.FechaFin || casoActual.FechaFin;
+      casoActual.Estatus = r.Estatus; // el estatus del registro más reciente manda
+      casoActual.registros.push(r.ID);
+    });
+    if(casoActual) casos.push(casoActual);
+  });
+  return casos;
+}
+
+
 const MESES = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
 
 function renderDashboard(){
@@ -459,6 +521,10 @@ function renderDashboard(){
   const esRT = t => t === 'RIESGO DE TRABAJO' || t === 'RIESGO DE TRAYECTO';
   const esEnf = t => t === 'ENFERMEDAD' || t === 'MATERNIDAD';
 
+  // agrupamos SIEMPRE por caso real (INICIAL + SUBSECUENTE(s) = 1 solo caso)
+  // antes de filtrar por año/planta, para no romper cadenas que cruzan el año.
+  const casosGlobal = calcularCasos(incapacidades);
+
   function serieMensual(lista, filtroTipo, campo){
     const arr = new Array(12).fill(0);
     lista.filter(i=>filtroTipo(i.Incapacidad)).forEach(i=>{
@@ -469,8 +535,8 @@ function renderDashboard(){
     return arr;
   }
 
-  const listaA = filtrar(incapacidades, anioA);
-  const listaB = filtrar(incapacidades, anioB);
+  const listaA = filtrar(casosGlobal, anioA);
+  const listaB = filtrar(casosGlobal, anioB);
 
   dibujarBarras('chartCasosRT', MESES, [
     {label:String(anioA), data:serieMensual(listaA, esRT,'casos'), color:'#9aa4b2'},
@@ -489,18 +555,18 @@ function renderDashboard(){
     {label:String(anioB), data:serieMensual(listaB, esEnf,'dias'), color:'#1f3b64'}
   ]);
 
-  // casos por planta (año B)
+  // casos por planta (año B) — usa casos reales, no registros individuales
   const porPlanta = {};
-  filtrar(incapacidades, anioB).forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
+  filtrar(casosGlobal, anioB).forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
   dibujarBarrasSimple('chartPlanta', Object.keys(porPlanta), Object.values(porPlanta));
 
-  // distribución por tipo (año B)
+  // distribución por tipo (año B) — usa casos reales
   const porTipo = {};
-  filtrar(incapacidades, anioB).forEach(i=>{ porTipo[i.Incapacidad] = (porTipo[i.Incapacidad]||0)+1; });
+  filtrar(casosGlobal, anioB).forEach(i=>{ porTipo[i.Incapacidad] = (porTipo[i.Incapacidad]||0)+1; });
   dibujarPastel('chartTipo', Object.keys(porTipo), Object.values(porTipo));
 
   // KPIs
-  document.getElementById('kpiCasosActivos').textContent = incapacidades.filter(i=>i.Estatus==='Activa').length;
+  document.getElementById('kpiCasosActivos').textContent = casosGlobal.filter(i=>i.Estatus==='Activa').length;
   document.getElementById('kpiCasosAnio').textContent = listaB.length;
   document.getElementById('lblCasosAnio').textContent = `Casos año ${anioB}`;
   document.getElementById('kpiDiasAnio').textContent = listaB.reduce((s,i)=>s+(i.Dias||0),0);
@@ -832,7 +898,7 @@ async function cargarCatalogoEmpleados(evento){
       Codigo: f['Codigo']||f['CODIGO']||f['Código']||f['CVEEMP']||'',
       Nombre: f['Nombre']||f['NOMBRE_COMPLETO']||f['NOMBRE']||'',
       Puesto: f['Puesto']||f['PUESTO']||'',
-      Planta: f['Planta']||f['Departamento']||f['DEPARTAMENTO']||'',
+      Planta: mapearArea(f['DEPARTAMENTO']) || f['Planta'] || f['Departamento'] || '',
       NSS: f['NSS']||f['IMSS']||f['NOIMSS']||'',
       Telefono: f['Telefono']||f['Teléfono']||f['TELEFONO']||'',
       FechaIngreso: f['FechaIngreso']||f['Fecha Ingreso']||f['FECHAALTA']||'',
