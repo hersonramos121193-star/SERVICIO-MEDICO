@@ -578,14 +578,13 @@ function renderDashboard(){
 
   const esRT = t => t === 'RIESGO DE TRABAJO' || t === 'RIESGO DE TRAYECTO';
   const esEnf = t => t === 'ENFERMEDAD' || t === 'MATERNIDAD';
+  const esInicial = r => (r.TipoRegistro||'').toUpperCase() === 'INICIAL';
 
-  // agrupamos SIEMPRE por caso real (INICIAL + SUBSECUENTE(s) = 1 solo caso)
-  // antes de filtrar por año/planta, para no romper cadenas que cruzan el año.
-  const casosGlobal = calcularCasos(incapacidades);
-
+  // "casos" = solo registros INICIAL (1 por caso). "días" = todos los registros
+  // (inicial + subsecuentes), sumados en el mes de cada registro.
   function serieMensual(lista, filtroTipo, campo){
     const arr = new Array(12).fill(0);
-    lista.filter(i=>filtroTipo(i.Incapacidad)).forEach(i=>{
+    lista.filter(i=>filtroTipo(i.Incapacidad) && (campo!=='casos' || esInicial(i))).forEach(i=>{
       const mes = anioDe(i.FechaInicio)!==null ? Number(i.FechaInicio.slice(5,7))-1 : null;
       if(mes===null) return;
       arr[mes] += campo==='dias' ? (i.Dias||0) : 1;
@@ -593,8 +592,8 @@ function renderDashboard(){
     return arr;
   }
 
-  const listaA = filtrar(casosGlobal, anioA);
-  const listaB = filtrar(casosGlobal, anioB);
+  const listaA = filtrar(incapacidades, anioA);
+  const listaB = filtrar(incapacidades, anioB);
 
   dibujarBarras('chartCasosRT', MESES, [
     {label:String(anioA), data:serieMensual(listaA, esRT,'casos'), color:'#9aa4b2'},
@@ -613,19 +612,20 @@ function renderDashboard(){
     {label:String(anioB), data:serieMensual(listaB, esEnf,'dias'), color:'#1f3b64'}
   ]);
 
-  // casos por planta (año B) — usa casos reales, no registros individuales
+  // casos por planta (año B) — solo INICIAL cuenta como caso
   const porPlanta = {};
-  filtrar(casosGlobal, anioB).forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
+  filtrar(incapacidades, anioB).filter(esInicial).forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
   dibujarBarrasSimple('chartPlanta', Object.keys(porPlanta), Object.values(porPlanta));
 
-  // distribución por tipo (año B) — usa casos reales
+  // distribución por tipo (año B) — solo INICIAL cuenta como caso
   const porTipo = {};
-  filtrar(casosGlobal, anioB).forEach(i=>{ porTipo[i.Incapacidad] = (porTipo[i.Incapacidad]||0)+1; });
+  filtrar(incapacidades, anioB).filter(esInicial).forEach(i=>{ porTipo[i.Incapacidad] = (porTipo[i.Incapacidad]||0)+1; });
   dibujarPastel('chartTipo', Object.keys(porTipo), Object.values(porTipo));
 
   // KPIs
+  const casosGlobal = calcularCasos(incapacidades); // para "activas" sí importa el estatus real de la cadena completa
   document.getElementById('kpiCasosActivos').textContent = casosGlobal.filter(i=>i.Estatus==='Activa').length;
-  document.getElementById('kpiCasosAnio').textContent = listaB.length;
+  document.getElementById('kpiCasosAnio').textContent = filtrar(incapacidades, anioB).filter(esInicial).length;
   document.getElementById('lblCasosAnio').textContent = `Casos año ${anioB}`;
   document.getElementById('kpiDiasAnio').textContent = listaB.reduce((s,i)=>s+(i.Dias||0),0);
   document.getElementById('lblDiasAnio').textContent = `Días perdidos año ${anioB}`;
