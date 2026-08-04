@@ -900,7 +900,7 @@ async function leerArchivoComoWorkbook(file){
     const doc = new DOMParser().parseFromString(texto, 'text/html');
     const tabla = doc.querySelector('table');
     if(!tabla) throw new Error('No se encontró una tabla dentro del HTML.');
-    return XLSX.utils.table_to_book(tabla);
+    return XLSX.utils.table_to_book(tabla, {raw:true});
   }
   if(file.name.toLowerCase().endsWith('.csv')){
     return XLSX.read(texto, {type:'string'});
@@ -911,7 +911,7 @@ async function leerArchivoComoWorkbook(file){
 
 function hojaAJson(wb){
   const hoja = wb.Sheets[wb.SheetNames[0]];
-  return XLSX.utils.sheet_to_json(hoja, {defval:''});
+  return XLSX.utils.sheet_to_json(hoja, {defval:'', raw:true});
 }
 
 async function cargarPlantillaIncapacidades(evento){
