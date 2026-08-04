@@ -116,7 +116,7 @@
   </div>
   <div class="grid grid-4" style="margin-bottom:20px;">
     <div class="card kpi"><div class="valor" id="kpiEnfermedad">0</div><div class="label">Enfermedad general</div></div>
-    <div class="card kpi"><div class="valor" id="kpiCasosActivos">0</div><div class="label">Incapacidades activas</div></div>
+    <div class="card kpi"><div class="valor" id="kpiCasosActivos">0</div><div class="label">Incapacidades activas (a la fecha, todas las fechas de inicio)</div></div>
     <div class="card kpi"><div class="valor" id="kpiDiasAnio">0</div><div class="label" id="lblDiasAnio">Días perdidos año B</div></div>
     <div class="card kpi"><div class="valor" id="kpiEmpleados">0</div><div class="label">Empleados en catálogo</div></div>
   </div>
@@ -689,7 +689,7 @@ function renderDashboard(){
 
   // KPIs generales
   const casosGlobal = calcularCasos(incapacidadesGraficables); // para "activas" sí importa el estatus real de la cadena completa
-  document.getElementById('kpiCasosActivos').textContent = casosGlobal.filter(i=>i.Estatus==='Activa').length;
+  document.getElementById('kpiCasosActivos').textContent = casosGlobal.filter(i=>i.Estatus==='Activa' && (!planta||i.Planta===planta)).length;
   document.getElementById('kpiDiasAnio').textContent = listaB.reduce((s,i)=>s+(i.Dias||0),0);
   document.getElementById('lblDiasAnio').textContent = `Días perdidos año ${anioB}`;
   document.getElementById('kpiEmpleados').textContent = empleados.filter(e=>e.Estatus==='Activo').length;
