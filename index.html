@@ -584,7 +584,7 @@ function renderDashboard(){
     anioDe(i.FechaInicio) === anio && (!planta || i.Planta === planta)
   );
 
-  const esRT = t => t === 'RIESGO DE TRABAJO' || t === 'RIESGO DE TRAYECTO';
+  const esRT = t => t === 'RIESGO DE TRABAJO';
   const esEnf = t => t === 'ENFERMEDAD' || t === 'MATERNIDAD';
   const esInicial = r => (r.TipoRegistro||'').toUpperCase() === 'INICIAL';
 
