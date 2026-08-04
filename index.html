@@ -567,10 +567,18 @@ function calcularCasos(lista){
 
 const MESES = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO','SEPTIEMBRE','OCTUBRE','NOVIEMBRE','DICIEMBRE'];
 
+/* Plantas/áreas que se excluyen de TODAS las gráficas del dashboard
+   (siguen visibles en la tabla de Incapacidades, solo no se grafican). */
+const PLANTAS_EXCLUIDAS_GRAFICAS = ['FLETES BORJA'];
+
 function renderDashboard(){
   const anioA = Number(document.getElementById('filtroAnioA').value);
   const anioB = Number(document.getElementById('filtroAnioB').value);
   const planta = document.getElementById('filtroPlanta').value;
+
+  const incapacidadesGraficables = incapacidades.filter(i =>
+    !PLANTAS_EXCLUIDAS_GRAFICAS.includes(String(i.Planta||'').trim().toUpperCase())
+  );
 
   const filtrar = (lista, anio) => lista.filter(i =>
     anioDe(i.FechaInicio) === anio && (!planta || i.Planta === planta)
@@ -592,8 +600,8 @@ function renderDashboard(){
     return arr;
   }
 
-  const listaA = filtrar(incapacidades, anioA);
-  const listaB = filtrar(incapacidades, anioB);
+  const listaA = filtrar(incapacidadesGraficables, anioA);
+  const listaB = filtrar(incapacidadesGraficables, anioB);
 
   dibujarBarras('chartCasosRT', MESES, [
     {label:String(anioA), data:serieMensual(listaA, esRT,'casos'), color:'#9aa4b2'},
@@ -614,18 +622,18 @@ function renderDashboard(){
 
   // casos por planta (año B) — solo INICIAL cuenta como caso
   const porPlanta = {};
-  filtrar(incapacidades, anioB).filter(esInicial).forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
+  filtrar(incapacidadesGraficables, anioB).filter(esInicial).forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
   dibujarBarrasSimple('chartPlanta', Object.keys(porPlanta), Object.values(porPlanta));
 
   // distribución por tipo (año B) — solo INICIAL cuenta como caso
   const porTipo = {};
-  filtrar(incapacidades, anioB).filter(esInicial).forEach(i=>{ porTipo[i.Incapacidad] = (porTipo[i.Incapacidad]||0)+1; });
+  filtrar(incapacidadesGraficables, anioB).filter(esInicial).forEach(i=>{ porTipo[i.Incapacidad] = (porTipo[i.Incapacidad]||0)+1; });
   dibujarPastel('chartTipo', Object.keys(porTipo), Object.values(porTipo));
 
   // KPIs
-  const casosGlobal = calcularCasos(incapacidades); // para "activas" sí importa el estatus real de la cadena completa
+  const casosGlobal = calcularCasos(incapacidadesGraficables); // para "activas" sí importa el estatus real de la cadena completa
   document.getElementById('kpiCasosActivos').textContent = casosGlobal.filter(i=>i.Estatus==='Activa').length;
-  document.getElementById('kpiCasosAnio').textContent = filtrar(incapacidades, anioB).filter(esInicial).length;
+  document.getElementById('kpiCasosAnio').textContent = filtrar(incapacidadesGraficables, anioB).filter(esInicial).length;
   document.getElementById('lblCasosAnio').textContent = `Casos año ${anioB}`;
   document.getElementById('kpiDiasAnio').textContent = listaB.reduce((s,i)=>s+(i.Dias||0),0);
   document.getElementById('lblDiasAnio').textContent = `Días perdidos año ${anioB}`;
