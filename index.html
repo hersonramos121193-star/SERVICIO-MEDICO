@@ -151,6 +151,10 @@
       <canvas id="chartPorAnio" height="180"></canvas>
     </div>
     <div class="card">
+      <div class="titulo-banda">DÍAS PERDIDOS POR AÑO (por tipo de incapacidad)</div>
+      <canvas id="chartDiasPorAnio" height="180"></canvas>
+    </div>
+    <div class="card">
       <div class="titulo-banda">CASOS POR MES (año B, todos los tipos)</div>
       <canvas id="chartPorMes" height="180"></canvas>
     </div>
@@ -334,6 +338,7 @@ function exportarGraficasExcel(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porPlanta), 'Casos por planta');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porTipo), 'Distribucion por tipo');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porAnio), 'Casos por año');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.diasPorAnio), 'Dias por año y tipo');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porMesTotal), 'Casos por mes (total)');
   XLSX.writeFile(wb, `dashboard_servicio_medico_${d.anioB}.xlsx`);
 }
@@ -656,10 +661,14 @@ function renderDashboard(){
     {label:String(anioB), data:serieMensual(listaB, esEnf,'dias'), color:'#1f3b64'}
   ]);
 
-  // casos por planta (año B) — solo INICIAL cuenta como caso
+  // casos por planta (año B) — solo INICIAL cuenta como caso, separado por tipo
+  const casosB_INICIAL = filtrar(incapacidadesGraficables, anioB).filter(esInicial);
+  const plantasList = [...new Set(casosB_INICIAL.map(i=>i.Planta||'Sin planta'))].sort();
+  dibujarBarrasApiladasPorTipo('chartPlanta', plantasList,
+    (p,t) => casosB_INICIAL.filter(i=>(i.Planta||'Sin planta')===p && i.Incapacidad===t).length
+  );
   const porPlanta = {};
-  filtrar(incapacidadesGraficables, anioB).filter(esInicial).forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
-  dibujarBarrasSimple('chartPlanta', Object.keys(porPlanta), Object.values(porPlanta));
+  casosB_INICIAL.forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
 
   // distribución por tipo (año B) — solo INICIAL cuenta como caso
   const porTipo = {};
@@ -675,6 +684,13 @@ function renderDashboard(){
   });
   const aniosOrdenados = Object.keys(porAnio).sort();
   dibujarBarrasSimple('chartPorAnio', aniosOrdenados, aniosOrdenados.map(a=>porAnio[a]));
+
+  // días perdidos por año, separado por tipo de incapacidad (respeta filtro de planta)
+  const registrosDiasFiltrados = incapacidadesGraficables.filter(i=>!planta||i.Planta===planta);
+  const aniosConDatos = [...new Set(registrosDiasFiltrados.map(i=>anioDe(i.FechaInicio)).filter(Boolean))].sort();
+  dibujarBarrasApiladasPorTipo('chartDiasPorAnio', aniosConDatos,
+    (a,t) => registrosDiasFiltrados.filter(i=>anioDe(i.FechaInicio)===a && i.Incapacidad===t).reduce((s,i)=>s+(i.Dias||0),0)
+  );
 
   // casos por mes — comparativo año A vs año B, todos los tipos combinados
   const casosBTodos = filtrar(incapacidadesGraficables, anioB).filter(esInicial);
@@ -720,9 +736,19 @@ function renderDashboard(){
     diasMesRT: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esRT,'dias')[i], [anioB]:serieMensual(listaB,esRT,'dias')[i]})),
     porMesEnf: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esEnf,'casos')[i], [anioB]:serieMensual(listaB,esEnf,'casos')[i]})),
     diasMesEnf: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esEnf,'dias')[i], [anioB]:serieMensual(listaB,esEnf,'dias')[i]})),
-    porPlanta: Object.entries(porPlanta).map(([Planta,Casos])=>({Planta,Casos})),
+    porPlanta: plantasList.map(p => {
+      const fila = {Planta:p};
+      TIPOS_INCAPACIDAD.forEach(t => fila[t] = casosB_INICIAL.filter(i=>(i.Planta||'Sin planta')===p && i.Incapacidad===t).length);
+      fila.Total = porPlanta[p];
+      return fila;
+    }),
     porTipo: Object.entries(porTipo).map(([Tipo,Casos])=>({Tipo,Casos})),
     porAnio: aniosOrdenados.map(a=>({Año:a, Casos:porAnio[a]})),
+    diasPorAnio: aniosConDatos.map(a => {
+      const fila = {Año:a};
+      TIPOS_INCAPACIDAD.forEach(t => fila[t] = registrosDiasFiltrados.filter(i=>anioDe(i.FechaInicio)===a && i.Incapacidad===t).reduce((s,i)=>s+(i.Dias||0),0));
+      return fila;
+    }),
     porMesTotal: MESES.map((m,i)=>({Mes:m, [anioA]:porMesA[i], [anioB]:porMesB[i]}))
   };
 }
@@ -741,6 +767,23 @@ function dibujarBarrasSimple(canvasId, labels, data){
     type:'bar',
     data:{ labels, datasets:[{label:'Casos', data, backgroundColor:'#3f6ba3'}] },
     options:{ responsive:true, plugins:{legend:{display:false}}, scales:{y:{beginAtZero:true}} }
+  });
+}
+const TIPOS_INCAPACIDAD = ['RIESGO DE TRABAJO','RIESGO DE TRAYECTO','MATERNIDAD','ENFERMEDAD'];
+const COLOR_TIPO = {
+  'RIESGO DE TRABAJO':'#1f3b64', 'RIESGO DE TRAYECTO':'#3f6ba3',
+  'MATERNIDAD':'#c0392b', 'ENFERMEDAD':'#9aa4b2'
+};
+function dibujarBarrasApiladasPorTipo(canvasId, labels, obtenerValor){
+  if(charts[canvasId]) charts[canvasId].destroy();
+  const datasets = TIPOS_INCAPACIDAD.map(t => ({
+    label: t, backgroundColor: COLOR_TIPO[t],
+    data: labels.map(l => obtenerValor(l, t))
+  }));
+  charts[canvasId] = new Chart(document.getElementById(canvasId), {
+    type:'bar',
+    data:{ labels, datasets },
+    options:{ responsive:true, plugins:{legend:{position:'bottom'}}, scales:{ x:{stacked:true}, y:{stacked:true, beginAtZero:true} } }
   });
 }
 function dibujarPastel(canvasId, labels, data){
