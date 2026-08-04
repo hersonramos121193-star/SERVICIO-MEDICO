@@ -410,13 +410,15 @@ function abrirModal(id){ document.getElementById(id).classList.add('activo'); }
    NORMALIZACIÓN
 ============================================================ */
 function normalizarIncap(r){
+  const fechaAlta = aFechaISO(r.FechaAlta);
   return {
     ID: r.ID || ('I'+Date.now()+Math.random().toString(36).slice(2,7)),
     Codigo: r.Codigo||'', Nombre: r.Nombre||'', Puesto: r.Puesto||'', Planta: r.Planta||'',
     TipoRegistro: r.TipoRegistro||'INICIAL', Incapacidad: (r.Incapacidad||'ENFERMEDAD').toUpperCase(),
-    FechaInicio: aFechaISO(r.FechaInicio), FechaFin: aFechaISO(r.FechaFin), FechaAlta: aFechaISO(r.FechaAlta),
+    FechaInicio: aFechaISO(r.FechaInicio), FechaFin: aFechaISO(r.FechaFin), FechaAlta: fechaAlta,
     Dias: Number(r.Dias)||0, Folio: r.Folio||'', Telefono: r.Telefono||'', IMSS: r.IMSS||'',
-    Estatus: r.Estatus||'Activa'
+    // si ya tiene fecha de alta capturada, el registro se cierra automáticamente
+    Estatus: fechaAlta ? 'Cerrada' : (r.Estatus||'Activa')
   };
 }
 function normalizarEmp(r){
@@ -588,7 +590,9 @@ function calcularCasos(lista){
       }
       casoActual.Dias += (Number(r.Dias)||0);
       casoActual.FechaFin = r.FechaFin || casoActual.FechaFin;
-      casoActual.Estatus = r.Estatus; // el estatus del registro más reciente manda
+      // el caso se considera Cerrado automáticamente en cuanto el registro más
+      // reciente de la cadena tiene Fecha de Alta capturada; si no, sigue Activo.
+      casoActual.Estatus = r.FechaAlta ? 'Cerrada' : 'Activa';
       casoActual.registros.push(r.ID);
     });
     if(casoActual) casos.push(casoActual);
