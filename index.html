@@ -151,7 +151,21 @@
       <input type="file" id="archivoIncap" class="oculto" accept=".xls,.xlsx,.csv" onchange="cargarPlantillaIncapacidades(event)">
       <button class="btn secundario" onclick="exportarIncapacidadesXlsx()">⬇ Exportar Excel</button>
     </div>
-    <input type="text" id="buscarIncap" placeholder="Buscar por nombre, código o folio..." style="width:260px;" oninput="renderTablaIncapacidades()">
+  </div>
+  <div class="barra-filtros">
+    <div><label>Planta</label><select id="filtroIncapPlanta" onchange="renderTablaIncapacidades()"><option value="">Todas</option></select></div>
+    <div><label>Ficha / Código</label><input type="text" id="filtroIncapFicha" oninput="renderTablaIncapacidades()" placeholder="Código..."></div>
+    <div><label>Nombre</label><input type="text" id="filtroIncapNombre" oninput="renderTablaIncapacidades()" placeholder="Nombre..."></div>
+    <div><label>Tipo de incapacidad</label><select id="filtroIncapTipo" onchange="renderTablaIncapacidades()"><option value="">Todos</option></select></div>
+    <div><label>Mes</label><select id="filtroIncapMes" onchange="renderTablaIncapacidades()">
+      <option value="">Todos</option>
+      <option value="1">Enero</option><option value="2">Febrero</option><option value="3">Marzo</option>
+      <option value="4">Abril</option><option value="5">Mayo</option><option value="6">Junio</option>
+      <option value="7">Julio</option><option value="8">Agosto</option><option value="9">Septiembre</option>
+      <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
+    </select></div>
+    <div><label>Folio</label><input type="text" id="filtroIncapFolio" oninput="renderTablaIncapacidades()" placeholder="Folio..."></div>
+    <div><button class="btn secundario" onclick="limpiarFiltrosIncap()">Limpiar filtros</button></div>
   </div>
   <div class="tabla-scroll">
     <table>
@@ -414,6 +428,7 @@ function normalizarEstatusEmpleado(v){
 function refrescarTodaLaUI(){
   poblarFiltrosAnio();
   poblarFiltroPlanta();
+  poblarFiltrosIncapacidades();
   renderDashboard();
   renderTablaIncapacidades();
   renderTablaEmpleados();
@@ -647,11 +662,26 @@ function dibujarPastel(canvasId, labels, data){
    TABLA INCAPACIDADES
 ============================================================ */
 function renderTablaIncapacidades(){
-  const q = (document.getElementById('buscarIncap').value||'').toLowerCase();
+  const planta = document.getElementById('filtroIncapPlanta').value;
+  const ficha = (document.getElementById('filtroIncapFicha').value||'').toLowerCase().trim();
+  const nombre = (document.getElementById('filtroIncapNombre').value||'').toLowerCase().trim();
+  const tipo = document.getElementById('filtroIncapTipo').value;
+  const mes = document.getElementById('filtroIncapMes').value;
+  const folio = (document.getElementById('filtroIncapFolio').value||'').toLowerCase().trim();
   const tbody = document.getElementById('tbodyIncapacidades');
-  const filtradas = incapacidades.filter(i =>
-    !q || [i.Nombre,i.Codigo,i.Folio].join(' ').toLowerCase().includes(q)
-  ).sort((a,b)=> (b.FechaInicio||'').localeCompare(a.FechaInicio||''));
+
+  const filtradas = incapacidades.filter(i => {
+    if(planta && i.Planta !== planta) return false;
+    if(ficha && !String(i.Codigo).toLowerCase().includes(ficha)) return false;
+    if(nombre && !String(i.Nombre).toLowerCase().includes(nombre)) return false;
+    if(tipo && i.Incapacidad !== tipo) return false;
+    if(folio && !String(i.Folio).toLowerCase().includes(folio)) return false;
+    if(mes){
+      const m = i.FechaInicio ? Number(i.FechaInicio.slice(5,7)) : null;
+      if(m !== Number(mes)) return false;
+    }
+    return true;
+  }).sort((a,b)=> (b.FechaInicio||'').localeCompare(a.FechaInicio||''));
 
   tbody.innerHTML = filtradas.map(i => `
     <tr>
@@ -665,6 +695,26 @@ function renderTablaIncapacidades(){
         <button class="btn chico peligro" onclick="eliminarIncapacidad('${i.ID}')">✕</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="13" style="text-align:center;color:#8892a0;">Sin registros</td></tr>';
+}
+
+function poblarFiltrosIncapacidades(){
+  const selPlanta = document.getElementById('filtroIncapPlanta');
+  const selTipo = document.getElementById('filtroIncapTipo');
+  const prevPlanta = selPlanta.value, prevTipo = selTipo.value;
+  const plantas = [...new Set(incapacidades.map(i=>i.Planta).filter(Boolean))].sort();
+  const tipos = [...new Set(incapacidades.map(i=>i.Incapacidad).filter(Boolean))].sort();
+  selPlanta.innerHTML = '<option value="">Todas</option>' + plantas.map(p=>`<option value="${p}">${p}</option>`).join('');
+  selTipo.innerHTML = '<option value="">Todos</option>' + tipos.map(t=>`<option value="${t}">${t}</option>`).join('');
+  selPlanta.value = prevPlanta; selTipo.value = prevTipo;
+}
+function limpiarFiltrosIncap(){
+  document.getElementById('filtroIncapPlanta').value='';
+  document.getElementById('filtroIncapFicha').value='';
+  document.getElementById('filtroIncapNombre').value='';
+  document.getElementById('filtroIncapTipo').value='';
+  document.getElementById('filtroIncapMes').value='';
+  document.getElementById('filtroIncapFolio').value='';
+  renderTablaIncapacidades();
 }
 
 function abrirModalIncapacidad(){
@@ -821,44 +871,33 @@ async function eliminarEmpleado(codigo){
 /* ============================================================
    CARGA DE ARCHIVOS (plantilla incapacidades / catálogo)
 ============================================================ */
-function leerArchivoComoWorkbook(file){
-  return new Promise((resolve,reject)=>{
-    const lector = new FileReader();
-    lector.onload = e => {
-      try{
-        const texto = e.target.result;
-        // detecta si es HTML-table disfrazado de .xls (típico export de portal IMSS/nómina)
-        if(typeof texto === 'string' && /<table/i.test(texto)){
-          const wb = XLSX.read(texto, {type:'string'});
-          resolve(wb);
-        } else {
-          const wb = XLSX.read(new Uint8Array(e.target.result), {type:'array'});
-          resolve(wb);
-        }
-      }catch(err){ reject(err); }
-    };
-    lector.onerror = reject;
-    // primero intenta como texto para detectar HTML; si falla, se reintenta como binario
-    if(file.name.toLowerCase().endsWith('.csv')){
-      lector.readAsArrayBuffer(file);
-    } else {
-      const lectorTexto = new FileReader();
-      lectorTexto.onload = ev => {
-        const contenido = ev.target.result;
-        if(/<table/i.test(contenido)){
-          resolve(XLSX.read(contenido, {type:'string'}));
-        } else {
-          const lectorBin = new FileReader();
-          lectorBin.onload = evb => resolve(XLSX.read(new Uint8Array(evb.target.result), {type:'array'}));
-          lectorBin.onerror = reject;
-          lectorBin.readAsArrayBuffer(file);
-        }
-      };
-      lectorTexto.onerror = reject;
-      lectorTexto.readAsText(file);
-      return;
-    }
-  });
+function normalizarClave(s){
+  return String(s||'').toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]/g,'');
+}
+function campo(fila, ...nombres){
+  const claves = Object.keys(fila);
+  for(const nombre of nombres){
+    const objetivo = normalizarClave(nombre);
+    const encontrada = claves.find(k=>normalizarClave(k)===objetivo);
+    if(encontrada!==undefined && fila[encontrada]!=='' && fila[encontrada]!==undefined) return fila[encontrada];
+  }
+  return '';
+}
+
+async function leerArchivoComoWorkbook(file){
+  const texto = await file.text();
+  if(/<table[\s>]/i.test(texto)){
+    // exporte tipo "portal" (tabla HTML guardada con extensión .xls/.xlsx) — se parsea como tabla real
+    const doc = new DOMParser().parseFromString(texto, 'text/html');
+    const tabla = doc.querySelector('table');
+    if(!tabla) throw new Error('No se encontró una tabla dentro del HTML.');
+    return XLSX.utils.table_to_book(tabla);
+  }
+  if(file.name.toLowerCase().endsWith('.csv')){
+    return XLSX.read(texto, {type:'string'});
+  }
+  const buf = await file.arrayBuffer();
+  return XLSX.read(new Uint8Array(buf), {type:'array'});
 }
 
 function hojaAJson(wb){
@@ -873,20 +912,20 @@ async function cargarPlantillaIncapacidades(evento){
     const wb = await leerArchivoComoWorkbook(file);
     const filas = hojaAJson(wb);
     const registros = filas.map(f => normalizarIncap({
-      Codigo: f['Código']||f['Codigo']||f['CÃ³digo']||'',
-      Nombre: f['Nombre']||'',
-      Puesto: f['Puesto']||'',
-      Planta: f['Planta']||'',
-      TipoRegistro: (f['Inicial/Subsecuente']||f['TipoRegistro']||'INICIAL').toString().toUpperCase(),
-      Incapacidad: (f['Incapacidad']||'ENFERMEDAD').toString().toUpperCase(),
-      FechaInicio: f['Fecha Inicio']||f['FechaInicio']||'',
-      FechaFin: f['Fecha Fin']||f['FechaFin']||'',
-      FechaAlta: f['Fecha Alta']||f['FechaAlta']||'',
-      Dias: f['Días']||f['Dias']||0,
-      Folio: f['Folio']||'',
-      Telefono: f['Teléfono']||f['Telefono']||'',
-      IMSS: f['IMSS']||'',
-      Estatus: f['Estatus']||'Activa'
+      Codigo: campo(f,'Codigo','Código','CVEEMP'),
+      Nombre: campo(f,'Nombre'),
+      Puesto: campo(f,'Puesto'),
+      Planta: campo(f,'Planta'),
+      TipoRegistro: String(campo(f,'Inicial/Subsecuente','TipoRegistro')||'INICIAL').toUpperCase(),
+      Incapacidad: String(campo(f,'Incapacidad')||'ENFERMEDAD').toUpperCase(),
+      FechaInicio: campo(f,'Fecha Inicio','FechaInicio'),
+      FechaFin: campo(f,'Fecha Fin','FechaFin'),
+      FechaAlta: campo(f,'Fecha Alta','FechaAlta'),
+      Dias: campo(f,'Días','Dias')||0,
+      Folio: campo(f,'Folio'),
+      Telefono: campo(f,'Teléfono','Telefono'),
+      IMSS: campo(f,'IMSS','NSS'),
+      Estatus: campo(f,'Estatus')||'Activa'
     }));
     if(!registros.length){ alert('No se detectaron filas válidas en el archivo.'); return; }
     cargaPendiente = {tipo:'incapacidades', registros};
@@ -943,15 +982,15 @@ async function cargarCatalogoEmpleados(evento){
       filas = hojaAJson(wb);
     }
     const registros = filas.map(f => normalizarEmp({
-      Codigo: f['Codigo']||f['CODIGO']||f['Código']||f['CVEEMP']||'',
-      Nombre: f['Nombre']||f['NOMBRE_COMPLETO']||f['NOMBRE']||'',
-      Puesto: f['Puesto']||f['PUESTO']||'',
-      Depto: f['Depto']||f['DEPARTAMENTO']||'',
-      NSS: f['NSS']||f['IMSS']||f['NOIMSS']||'',
-      Telefono: f['Telefono']||f['Teléfono']||f['TELEFONO']||'',
-      FechaIngreso: f['FechaIngreso']||f['Fecha Ingreso']||f['FECHAALTA']||'',
-      Estatus: normalizarEstatusEmpleado(f['Estatus']||f['ESTATUS']||''),
-      Notas: f['Notas']||f['EMPOBSERVACIONES']||''
+      Codigo: campo(f,'Codigo','Código','CVEEMP'),
+      Nombre: campo(f,'Nombre','NOMBRE_COMPLETO'),
+      Puesto: campo(f,'Puesto'),
+      Depto: campo(f,'Depto','Departamento'),
+      NSS: campo(f,'NSS','IMSS','NOIMSS'),
+      Telefono: campo(f,'Telefono','Teléfono'),
+      FechaIngreso: campo(f,'FechaIngreso','Fecha Ingreso','FechaAlta'),
+      Estatus: normalizarEstatusEmpleado(campo(f,'Estatus')),
+      Notas: campo(f,'Notas','EmpObservaciones')
     })).filter(e=>e.Codigo);
     if(!registros.length){ alert('No se detectaron filas válidas. Revisa que exista la columna "Codigo".'); return; }
     cargaPendiente = {tipo:'empleados', registros};
