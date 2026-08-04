@@ -786,12 +786,48 @@ async function cargarPlantillaIncapacidades(evento){
   }
 }
 
+/**
+ * Repara CSVs "sucios" donde algún campo (típicamente observaciones/notas)
+ * contiene saltos de línea reales sin ir entre comillas, lo que rompe el
+ * formato CSV estándar (cada salto se leería como fila nueva). Reconstruye
+ * las filas usando el número de columnas del encabezado como referencia.
+ */
+function repararYParsearCSV(texto){
+  const lineas = texto.split(/\r\n|\n|\r/);
+  const encabezado = lineas[0].split(',').map(h=>h.trim());
+  const nCols = encabezado.length;
+  const filasCrudas = [];
+  let buffer = '';
+  for(let i=1;i<lineas.length;i++){
+    buffer = buffer ? buffer + ' ' + lineas[i] : lineas[i];
+    const nComas = (buffer.match(/,/g)||[]).length;
+    if(nComas >= nCols-1 || i===lineas.length-1){
+      if(buffer.trim()) filasCrudas.push(buffer);
+      buffer='';
+    }
+  }
+  return filasCrudas.map(linea=>{
+    const partes = linea.split(',');
+    const valores = partes.slice(0,nCols-1);
+    valores.push(partes.slice(nCols-1).join(','));
+    const obj={};
+    encabezado.forEach((h,idx)=>{ obj[h] = (valores[idx]||'').trim(); });
+    return obj;
+  });
+}
+
 async function cargarCatalogoEmpleados(evento){
   const file = evento.target.files[0];
   if(!file) return;
   try{
-    const wb = await leerArchivoComoWorkbook(file);
-    const filas = hojaAJson(wb);
+    let filas;
+    if(file.name.toLowerCase().endsWith('.csv')){
+      const texto = await file.text();
+      filas = repararYParsearCSV(texto);
+    } else {
+      const wb = await leerArchivoComoWorkbook(file);
+      filas = hojaAJson(wb);
+    }
     const registros = filas.map(f => normalizarEmp({
       Codigo: f['Codigo']||f['CODIGO']||f['Código']||f['CVEEMP']||'',
       Nombre: f['Nombre']||f['NOMBRE_COMPLETO']||f['NOMBRE']||'',
