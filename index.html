@@ -676,11 +676,16 @@ function renderDashboard(){
   const aniosOrdenados = Object.keys(porAnio).sort();
   dibujarBarrasSimple('chartPorAnio', aniosOrdenados, aniosOrdenados.map(a=>porAnio[a]));
 
-  // casos por mes (año B, todos los tipos)
+  // casos por mes — comparativo año A vs año B, todos los tipos combinados
   const casosBTodos = filtrar(incapacidadesGraficables, anioB).filter(esInicial);
-  const porMes = new Array(12).fill(0);
-  casosBTodos.forEach(i=>{ const m = Number(i.FechaInicio.slice(5,7))-1; porMes[m]++; });
-  dibujarBarrasSimple('chartPorMes', MESES, porMes);
+  const porMesA = new Array(12).fill(0);
+  const porMesB = new Array(12).fill(0);
+  filtrar(incapacidadesGraficables, anioA).filter(esInicial).forEach(i=>{ porMesA[Number(i.FechaInicio.slice(5,7))-1]++; });
+  casosBTodos.forEach(i=>{ porMesB[Number(i.FechaInicio.slice(5,7))-1]++; });
+  dibujarBarras('chartPorMes', MESES, [
+    {label:String(anioA), data:porMesA, color:'#9aa4b2'},
+    {label:String(anioB), data:porMesB, color:'#1f3b64'}
+  ]);
 
   // KPIs por tipo (año B)
   const contarTipo = t => casosBTodos.filter(i=>i.Incapacidad===t).length;
@@ -718,7 +723,7 @@ function renderDashboard(){
     porPlanta: Object.entries(porPlanta).map(([Planta,Casos])=>({Planta,Casos})),
     porTipo: Object.entries(porTipo).map(([Tipo,Casos])=>({Tipo,Casos})),
     porAnio: aniosOrdenados.map(a=>({Año:a, Casos:porAnio[a]})),
-    porMesTotal: MESES.map((m,i)=>({Mes:m, Casos:porMes[i]}))
+    porMesTotal: MESES.map((m,i)=>({Mes:m, [anioA]:porMesA[i], [anioB]:porMesB[i]}))
   };
 }
 
