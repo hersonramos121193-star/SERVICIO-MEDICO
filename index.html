@@ -884,8 +884,17 @@ function campo(fila, ...nombres){
   return '';
 }
 
+async function decodificarTexto(file){
+  const buf = await file.arrayBuffer();
+  let texto = new TextDecoder('utf-8').decode(buf);
+  if(texto.includes('\uFFFD')){
+    texto = new TextDecoder('windows-1252').decode(buf);
+  }
+  return texto;
+}
+
 async function leerArchivoComoWorkbook(file){
-  const texto = await file.text();
+  const texto = await decodificarTexto(file);
   if(/<table[\s>]/i.test(texto)){
     // exporte tipo "portal" (tabla HTML guardada con extensión .xls/.xlsx) — se parsea como tabla real
     const doc = new DOMParser().parseFromString(texto, 'text/html');
@@ -975,7 +984,7 @@ async function cargarCatalogoEmpleados(evento){
   try{
     let filas;
     if(file.name.toLowerCase().endsWith('.csv')){
-      const texto = await file.text();
+      const texto = await decodificarTexto(file);
       filas = repararYParsearCSV(texto);
     } else {
       const wb = await leerArchivoComoWorkbook(file);
