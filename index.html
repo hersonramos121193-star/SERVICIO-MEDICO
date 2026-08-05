@@ -108,16 +108,22 @@
     <div><button class="btn secundario" onclick="exportarGraficasExcel()">⬇ Exportar gráficas a Excel</button></div>
   </div>
 
-  <div class="grid grid-4" style="margin-bottom:12px;">
-    <div class="card kpi"><div class="valor" id="kpiTotalCasos">0</div><div class="label" id="lblTotalCasos">Incapacidades totales (año B)</div></div>
-    <div class="card kpi"><div class="valor" id="kpiRT">0</div><div class="label">Riesgo de trabajo</div></div>
-    <div class="card kpi"><div class="valor" id="kpiTrayecto">0</div><div class="label">Riesgo de trayecto</div></div>
-    <div class="card kpi"><div class="valor" id="kpiMaternidad">0</div><div class="label">Maternidad</div></div>
+  <div class="card" style="margin-bottom:20px;">
+    <div class="titulo-banda">MÉTRICAS — AÑO A vs AÑO B</div>
+    <table>
+      <thead><tr><th>Métrica</th><th id="thAnioA">Año A</th><th id="thAnioB">Año B</th></tr></thead>
+      <tbody>
+        <tr><td>Incapacidades totales</td><td id="kpiTotalCasosA">0</td><td id="kpiTotalCasos">0</td></tr>
+        <tr><td>Riesgo de trabajo</td><td id="kpiRTA">0</td><td id="kpiRT">0</td></tr>
+        <tr><td>Riesgo de trayecto</td><td id="kpiTrayectoA">0</td><td id="kpiTrayecto">0</td></tr>
+        <tr><td>Maternidad</td><td id="kpiMaternidadA">0</td><td id="kpiMaternidad">0</td></tr>
+        <tr><td>Enfermedad general</td><td id="kpiEnfermedadA">0</td><td id="kpiEnfermedad">0</td></tr>
+        <tr><td>Días perdidos</td><td id="kpiDiasAnioA">0</td><td id="kpiDiasAnio">0</td></tr>
+      </tbody>
+    </table>
   </div>
   <div class="grid grid-4" style="margin-bottom:20px;">
-    <div class="card kpi"><div class="valor" id="kpiEnfermedad">0</div><div class="label">Enfermedad general</div></div>
     <div class="card kpi"><div class="valor" id="kpiCasosActivos">0</div><div class="label">Incapacidades activas (a la fecha, todas las fechas de inicio)</div></div>
-    <div class="card kpi"><div class="valor" id="kpiDiasAnio">0</div><div class="label" id="lblDiasAnio">Días perdidos año B</div></div>
     <div class="card kpi"><div class="valor" id="kpiEmpleados">0</div><div class="label">Empleados en catálogo</div></div>
   </div>
 
@@ -139,8 +145,16 @@
       <canvas id="chartDiasEnf" height="180"></canvas>
     </div>
     <div class="card">
+      <div class="titulo-banda">CASOS POR PLANTA (año A)</div>
+      <canvas id="chartPlantaA" height="180"></canvas>
+    </div>
+    <div class="card">
       <div class="titulo-banda">CASOS POR PLANTA (año B)</div>
       <canvas id="chartPlanta" height="180"></canvas>
+    </div>
+    <div class="card">
+      <div class="titulo-banda">DISTRIBUCIÓN POR TIPO DE INCAPACIDAD (año A)</div>
+      <canvas id="chartTipoA" height="180"></canvas>
     </div>
     <div class="card">
       <div class="titulo-banda">DISTRIBUCIÓN POR TIPO DE INCAPACIDAD (año B)</div>
@@ -184,6 +198,7 @@
       <option value="10">Octubre</option><option value="11">Noviembre</option><option value="12">Diciembre</option>
     </select></div>
     <div><label>Folio</label><input type="text" id="filtroIncapFolio" oninput="renderTablaIncapacidades()" placeholder="Folio..."></div>
+    <div><label>Año</label><select id="filtroIncapAnio" onchange="renderTablaIncapacidades()"><option value="">Todos</option></select></div>
     <div><button class="btn secundario" onclick="limpiarFiltrosIncap()">Limpiar filtros</button></div>
   </div>
   <div class="tabla-scroll">
@@ -335,8 +350,10 @@ function exportarGraficasExcel(){
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.diasMesRT), 'Dias RT por mes');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porMesEnf), 'Casos Enf por mes');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.diasMesEnf), 'Dias Enf por mes');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porPlanta), 'Casos por planta');
-  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porTipo), 'Distribucion por tipo');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porPlantaA), 'Casos por planta (A)');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porPlanta), 'Casos por planta (B)');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porTipoA), 'Distribucion tipo (A)');
+  XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porTipo), 'Distribucion tipo (B)');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porAnio), 'Casos por año');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.diasPorAnio), 'Dias por año y tipo');
   XLSX.utils.book_append_sheet(wb, XLSX.utils.json_to_sheet(d.porMesTotal), 'Casos por mes (total)');
@@ -661,18 +678,26 @@ function renderDashboard(){
     {label:String(anioB), data:serieMensual(listaB, esEnf,'dias'), color:'#1f3b64'}
   ]);
 
-  // casos por planta (año B) — solo INICIAL cuenta como caso, separado por tipo
+  // casos por planta — separado por tipo, año A y año B
+  const casosA_INICIAL = filtrar(incapacidadesGraficables, anioA).filter(esInicial);
   const casosB_INICIAL = filtrar(incapacidadesGraficables, anioB).filter(esInicial);
+  const plantasListA = [...new Set(casosA_INICIAL.map(i=>i.Planta||'Sin planta'))].sort();
   const plantasList = [...new Set(casosB_INICIAL.map(i=>i.Planta||'Sin planta'))].sort();
+  dibujarBarrasApiladasPorTipo('chartPlantaA', plantasListA,
+    (p,t) => casosA_INICIAL.filter(i=>(i.Planta||'Sin planta')===p && i.Incapacidad===t).length
+  );
   dibujarBarrasApiladasPorTipo('chartPlanta', plantasList,
     (p,t) => casosB_INICIAL.filter(i=>(i.Planta||'Sin planta')===p && i.Incapacidad===t).length
   );
   const porPlanta = {};
   casosB_INICIAL.forEach(i=>{ porPlanta[i.Planta||'Sin planta'] = (porPlanta[i.Planta||'Sin planta']||0)+1; });
 
-  // distribución por tipo (año B) — solo INICIAL cuenta como caso
+  // distribución por tipo — año A y año B
+  const porTipoA = {};
+  casosA_INICIAL.forEach(i=>{ porTipoA[i.Incapacidad] = (porTipoA[i.Incapacidad]||0)+1; });
+  dibujarPastel('chartTipoA', Object.keys(porTipoA), Object.values(porTipoA));
   const porTipo = {};
-  filtrar(incapacidadesGraficables, anioB).filter(esInicial).forEach(i=>{ porTipo[i.Incapacidad] = (porTipo[i.Incapacidad]||0)+1; });
+  casosB_INICIAL.forEach(i=>{ porTipo[i.Incapacidad] = (porTipo[i.Incapacidad]||0)+1; });
   dibujarPastel('chartTipo', Object.keys(porTipo), Object.values(porTipo));
 
   // casos por año (histórico completo, todos los tipos, respeta planta)
@@ -703,45 +728,59 @@ function renderDashboard(){
     {label:String(anioB), data:porMesB, color:'#1f3b64'}
   ]);
 
-  // KPIs por tipo (año B)
+  // KPIs por tipo — año A y año B
+  const contarTipoA = t => casosA_INICIAL.filter(i=>i.Incapacidad===t).length;
   const contarTipo = t => casosBTodos.filter(i=>i.Incapacidad===t).length;
+  document.getElementById('thAnioA').textContent = `Año ${anioA}`;
+  document.getElementById('thAnioB').textContent = `Año ${anioB}`;
+  document.getElementById('kpiTotalCasosA').textContent = casosA_INICIAL.length;
   document.getElementById('kpiTotalCasos').textContent = casosBTodos.length;
-  document.getElementById('lblTotalCasos').textContent = `Incapacidades totales (año ${anioB})`;
+  document.getElementById('kpiRTA').textContent = contarTipoA('RIESGO DE TRABAJO');
   document.getElementById('kpiRT').textContent = contarTipo('RIESGO DE TRABAJO');
+  document.getElementById('kpiTrayectoA').textContent = contarTipoA('RIESGO DE TRAYECTO');
   document.getElementById('kpiTrayecto').textContent = contarTipo('RIESGO DE TRAYECTO');
+  document.getElementById('kpiMaternidadA').textContent = contarTipoA('MATERNIDAD');
   document.getElementById('kpiMaternidad').textContent = contarTipo('MATERNIDAD');
+  document.getElementById('kpiEnfermedadA').textContent = contarTipoA('ENFERMEDAD');
   document.getElementById('kpiEnfermedad').textContent = contarTipo('ENFERMEDAD');
+  document.getElementById('kpiDiasAnioA').textContent = listaA.reduce((s,i)=>s+(i.Dias||0),0);
+  document.getElementById('kpiDiasAnio').textContent = listaB.reduce((s,i)=>s+(i.Dias||0),0);
 
-  // KPIs generales
+  // KPIs generales (no dependen del año)
   const casosGlobal = calcularCasos(incapacidadesGraficables); // para "activas" sí importa el estatus real de la cadena completa
   document.getElementById('kpiCasosActivos').textContent = casosGlobal.filter(i=>i.Estatus==='Activa' && (!planta||i.Planta===planta)).length;
-  document.getElementById('kpiDiasAnio').textContent = listaB.reduce((s,i)=>s+(i.Dias||0),0);
-  document.getElementById('lblDiasAnio').textContent = `Días perdidos año ${anioB}`;
   document.getElementById('kpiEmpleados').textContent = empleados.filter(e=>e.Estatus==='Activo').length;
 
   // datos guardados para exportar a Excel
   ultimosDatosDashboard = {
     anioA, anioB, planta: planta||'Todas',
     resumen: [
-      {Indicador:'Incapacidades totales', Valor: casosBTodos.length},
-      {Indicador:'Riesgo de trabajo', Valor: contarTipo('RIESGO DE TRABAJO')},
-      {Indicador:'Riesgo de trayecto', Valor: contarTipo('RIESGO DE TRAYECTO')},
-      {Indicador:'Maternidad', Valor: contarTipo('MATERNIDAD')},
-      {Indicador:'Enfermedad general', Valor: contarTipo('ENFERMEDAD')},
-      {Indicador:'Incapacidades activas', Valor: casosGlobal.filter(i=>i.Estatus==='Activa').length},
-      {Indicador:'Días perdidos', Valor: listaB.reduce((s,i)=>s+(i.Dias||0),0)},
-      {Indicador:'Empleados activos en catálogo', Valor: empleados.filter(e=>e.Estatus==='Activo').length}
+      {Indicador:'Incapacidades totales', [`Año ${anioA}`]: casosA_INICIAL.length, [`Año ${anioB}`]: casosBTodos.length},
+      {Indicador:'Riesgo de trabajo', [`Año ${anioA}`]: contarTipoA('RIESGO DE TRABAJO'), [`Año ${anioB}`]: contarTipo('RIESGO DE TRABAJO')},
+      {Indicador:'Riesgo de trayecto', [`Año ${anioA}`]: contarTipoA('RIESGO DE TRAYECTO'), [`Año ${anioB}`]: contarTipo('RIESGO DE TRAYECTO')},
+      {Indicador:'Maternidad', [`Año ${anioA}`]: contarTipoA('MATERNIDAD'), [`Año ${anioB}`]: contarTipo('MATERNIDAD')},
+      {Indicador:'Enfermedad general', [`Año ${anioA}`]: contarTipoA('ENFERMEDAD'), [`Año ${anioB}`]: contarTipo('ENFERMEDAD')},
+      {Indicador:'Días perdidos', [`Año ${anioA}`]: listaA.reduce((s,i)=>s+(i.Dias||0),0), [`Año ${anioB}`]: listaB.reduce((s,i)=>s+(i.Dias||0),0)},
+      {Indicador:'Incapacidades activas (a la fecha)', [`Año ${anioA}`]:'', [`Año ${anioB}`]: casosGlobal.filter(i=>i.Estatus==='Activa').length},
+      {Indicador:'Empleados activos en catálogo', [`Año ${anioA}`]:'', [`Año ${anioB}`]: empleados.filter(e=>e.Estatus==='Activo').length}
     ],
     porMesRT: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esRT,'casos')[i], [anioB]:serieMensual(listaB,esRT,'casos')[i]})),
     diasMesRT: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esRT,'dias')[i], [anioB]:serieMensual(listaB,esRT,'dias')[i]})),
     porMesEnf: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esEnf,'casos')[i], [anioB]:serieMensual(listaB,esEnf,'casos')[i]})),
     diasMesEnf: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esEnf,'dias')[i], [anioB]:serieMensual(listaB,esEnf,'dias')[i]})),
+    porPlantaA: plantasListA.map(p => {
+      const fila = {Planta:p};
+      TIPOS_INCAPACIDAD.forEach(t => fila[t] = casosA_INICIAL.filter(i=>(i.Planta||'Sin planta')===p && i.Incapacidad===t).length);
+      fila.Total = casosA_INICIAL.filter(i=>(i.Planta||'Sin planta')===p).length;
+      return fila;
+    }),
     porPlanta: plantasList.map(p => {
       const fila = {Planta:p};
       TIPOS_INCAPACIDAD.forEach(t => fila[t] = casosB_INICIAL.filter(i=>(i.Planta||'Sin planta')===p && i.Incapacidad===t).length);
       fila.Total = porPlanta[p];
       return fila;
     }),
+    porTipoA: Object.entries(porTipoA).map(([Tipo,Casos])=>({Tipo,Casos})),
     porTipo: Object.entries(porTipo).map(([Tipo,Casos])=>({Tipo,Casos})),
     porAnio: aniosOrdenados.map(a=>({Año:a, Casos:porAnio[a]})),
     diasPorAnio: aniosConDatos.map(a => {
@@ -806,6 +845,7 @@ function renderTablaIncapacidades(){
   const tipo = document.getElementById('filtroIncapTipo').value;
   const mes = document.getElementById('filtroIncapMes').value;
   const folio = (document.getElementById('filtroIncapFolio').value||'').toLowerCase().trim();
+  const anio = document.getElementById('filtroIncapAnio').value;
   const tbody = document.getElementById('tbodyIncapacidades');
 
   const filtradas = incapacidades.filter(i => {
@@ -814,6 +854,7 @@ function renderTablaIncapacidades(){
     if(nombre && !String(i.Nombre).toLowerCase().includes(nombre)) return false;
     if(tipo && i.Incapacidad !== tipo) return false;
     if(folio && !String(i.Folio).toLowerCase().includes(folio)) return false;
+    if(anio && anioDe(i.FechaInicio) !== Number(anio)) return false;
     if(mes){
       const m = i.FechaInicio ? Number(i.FechaInicio.slice(5,7)) : null;
       if(m !== Number(mes)) return false;
@@ -838,12 +879,15 @@ function renderTablaIncapacidades(){
 function poblarFiltrosIncapacidades(){
   const selPlanta = document.getElementById('filtroIncapPlanta');
   const selTipo = document.getElementById('filtroIncapTipo');
-  const prevPlanta = selPlanta.value, prevTipo = selTipo.value;
+  const selAnio = document.getElementById('filtroIncapAnio');
+  const prevPlanta = selPlanta.value, prevTipo = selTipo.value, prevAnio = selAnio.value;
   const plantas = [...new Set(incapacidades.map(i=>i.Planta).filter(Boolean))].sort();
   const tipos = [...new Set(incapacidades.map(i=>i.Incapacidad).filter(Boolean))].sort();
+  const anios = [...new Set(incapacidades.map(i=>anioDe(i.FechaInicio)).filter(Boolean))].sort();
   selPlanta.innerHTML = '<option value="">Todas</option>' + plantas.map(p=>`<option value="${p}">${p}</option>`).join('');
   selTipo.innerHTML = '<option value="">Todos</option>' + tipos.map(t=>`<option value="${t}">${t}</option>`).join('');
-  selPlanta.value = prevPlanta; selTipo.value = prevTipo;
+  selAnio.innerHTML = '<option value="">Todos</option>' + anios.map(a=>`<option value="${a}">${a}</option>`).join('');
+  selPlanta.value = prevPlanta; selTipo.value = prevTipo; selAnio.value = prevAnio;
 }
 function limpiarFiltrosIncap(){
   document.getElementById('filtroIncapPlanta').value='';
@@ -852,6 +896,7 @@ function limpiarFiltrosIncap(){
   document.getElementById('filtroIncapTipo').value='';
   document.getElementById('filtroIncapMes').value='';
   document.getElementById('filtroIncapFolio').value='';
+  document.getElementById('filtroIncapAnio').value='';
   renderTablaIncapacidades();
 }
 
