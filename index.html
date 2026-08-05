@@ -827,7 +827,7 @@ function dibujarBarrasApiladasPorTipo(canvasId, labels, obtenerValor){
 }
 function dibujarPastel(canvasId, labels, data){
   if(charts[canvasId]) charts[canvasId].destroy();
-  const colores = ['#1f3b64','#3f6ba3','#7fb3ff','#9aa4b2','#c0392b'];
+  const colores = labels.map(l => COLOR_TIPO[l] || '#7fb3ff');
   charts[canvasId] = new Chart(document.getElementById(canvasId), {
     type:'doughnut',
     data:{ labels, datasets:[{data, backgroundColor:colores}] },
