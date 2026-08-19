@@ -201,6 +201,19 @@
     <div><label>Año</label><select id="filtroIncapAnio" onchange="renderTablaIncapacidades()"><option value="">Todos</option></select></div>
     <div><button class="btn secundario" onclick="limpiarFiltrosIncap()">Limpiar filtros</button></div>
   </div>
+  <div class="barra-filtros" style="margin-top:-8px;">
+    <div style="display:flex;flex-direction:column;">
+      <label style="margin-bottom:6px;">Detectar incapacidades que crucen o terminen el día 01 en:</label>
+      <div style="display:flex;gap:14px;flex-wrap:wrap;font-size:13px;">
+        <label><input type="checkbox" class="chkDia1" value="1" onchange="renderTablaIncapacidades()"> Enero</label>
+        <label><input type="checkbox" class="chkDia1" value="3" onchange="renderTablaIncapacidades()"> Marzo</label>
+        <label><input type="checkbox" class="chkDia1" value="5" onchange="renderTablaIncapacidades()"> Mayo</label>
+        <label><input type="checkbox" class="chkDia1" value="7" onchange="renderTablaIncapacidades()"> Julio</label>
+        <label><input type="checkbox" class="chkDia1" value="9" onchange="renderTablaIncapacidades()"> Septiembre</label>
+        <label><input type="checkbox" class="chkDia1" value="11" onchange="renderTablaIncapacidades()"> Noviembre</label>
+      </div>
+    </div>
+  </div>
   <div class="tabla-scroll">
     <table>
       <thead><tr>
@@ -838,6 +851,21 @@ function dibujarPastel(canvasId, labels, data){
 /* ============================================================
    TABLA INCAPACIDADES
 ============================================================ */
+function cruzaDia1(registro, mesesSeleccionados){
+  if(!registro.FechaInicio) return false;
+  const inicio = new Date(registro.FechaInicio+'T00:00:00');
+  const fin = registro.FechaFin ? new Date(registro.FechaFin+'T00:00:00') : inicio;
+  if(isNaN(inicio) || isNaN(fin)) return false;
+  for(let anio = inicio.getFullYear(); anio <= fin.getFullYear(); anio++){
+    for(const mes of mesesSeleccionados){
+      const dia1 = new Date(anio, mes-1, 1);
+      // cuenta si el rango [inicio, fin] atraviesa el día 01, o si termina exactamente ese día
+      if(dia1 >= inicio && dia1 <= fin) return true;
+    }
+  }
+  return false;
+}
+
 function renderTablaIncapacidades(){
   const planta = document.getElementById('filtroIncapPlanta').value;
   const ficha = (document.getElementById('filtroIncapFicha').value||'').toLowerCase().trim();
@@ -846,6 +874,7 @@ function renderTablaIncapacidades(){
   const mes = document.getElementById('filtroIncapMes').value;
   const folio = (document.getElementById('filtroIncapFolio').value||'').toLowerCase().trim();
   const anio = document.getElementById('filtroIncapAnio').value;
+  const mesesDia1 = Array.from(document.querySelectorAll('.chkDia1:checked')).map(c=>Number(c.value));
   const tbody = document.getElementById('tbodyIncapacidades');
 
   const filtradas = incapacidades.filter(i => {
@@ -859,6 +888,7 @@ function renderTablaIncapacidades(){
       const m = i.FechaInicio ? Number(i.FechaInicio.slice(5,7)) : null;
       if(m !== Number(mes)) return false;
     }
+    if(mesesDia1.length && !cruzaDia1(i, mesesDia1)) return false;
     return true;
   }).sort((a,b)=> (b.FechaInicio||'').localeCompare(a.FechaInicio||''));
 
@@ -897,6 +927,7 @@ function limpiarFiltrosIncap(){
   document.getElementById('filtroIncapMes').value='';
   document.getElementById('filtroIncapFolio').value='';
   document.getElementById('filtroIncapAnio').value='';
+  document.querySelectorAll('.chkDia1').forEach(c=>c.checked=false);
   renderTablaIncapacidades();
 }
 
