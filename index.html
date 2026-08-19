@@ -287,7 +287,7 @@
     </div>
     <div class="fila-modal">
       <div class="campo"><label>Folio</label><input type="text" id="incapFolio"></div>
-      <div class="campo"><label>Estatus</label><select id="incapEstatus"><option>Activa</option><option>Cerrada</option></select></div>
+      <div class="campo"><label>Estatus (automático, según Fecha Fin vs. hoy)</label><select id="incapEstatus" disabled><option>Activa</option><option>Cerrada</option></select></div>
     </div>
     <div class="fila-modal">
       <div class="campo"><label>Teléfono</label><input type="text" id="incapTelefono"></div>
@@ -444,16 +444,23 @@ function abrirModal(id){ document.getElementById(id).classList.add('activo'); }
 /* ============================================================
    NORMALIZACIÓN
 ============================================================ */
+function calcularEstatusPorFecha(fechaFin){
+  if(!fechaFin) return 'Activa';
+  const hoy = new Date(); hoy.setHours(0,0,0,0);
+  const fin = new Date(fechaFin+'T00:00:00');
+  if(isNaN(fin)) return 'Activa';
+  return fin <= hoy ? 'Cerrada' : 'Activa';
+}
 function normalizarIncap(r){
-  const fechaAlta = aFechaISO(r.FechaAlta);
+  const fechaFin = aFechaISO(r.FechaFin);
   return {
     ID: r.ID || ('I'+Date.now()+Math.random().toString(36).slice(2,7)),
     Codigo: r.Codigo||'', Nombre: r.Nombre||'', Puesto: r.Puesto||'', Planta: r.Planta||'',
     TipoRegistro: r.TipoRegistro||'INICIAL', Incapacidad: (r.Incapacidad||'ENFERMEDAD').toUpperCase(),
-    FechaInicio: aFechaISO(r.FechaInicio), FechaFin: aFechaISO(r.FechaFin), FechaAlta: fechaAlta,
+    FechaInicio: aFechaISO(r.FechaInicio), FechaFin: fechaFin, FechaAlta: aFechaISO(r.FechaAlta),
     Dias: Number(r.Dias)||0, Folio: r.Folio||'', Telefono: r.Telefono||'', IMSS: r.IMSS||'',
-    // si ya tiene fecha de alta capturada, el registro se cierra automáticamente
-    Estatus: fechaAlta ? 'Cerrada' : (r.Estatus||'Activa')
+    // Activa mientras no se llegue a la fecha de fin; Cerrada automáticamente al llegar/pasar esa fecha
+    Estatus: calcularEstatusPorFecha(fechaFin)
   };
 }
 function normalizarEmp(r){
@@ -625,9 +632,9 @@ function calcularCasos(lista){
       }
       casoActual.Dias += (Number(r.Dias)||0);
       casoActual.FechaFin = r.FechaFin || casoActual.FechaFin;
-      // el caso se considera Cerrado automáticamente en cuanto el registro más
-      // reciente de la cadena tiene Fecha de Alta capturada; si no, sigue Activo.
-      casoActual.Estatus = r.FechaAlta ? 'Cerrada' : 'Activa';
+      // el caso se considera Cerrado automáticamente cuando la fecha de hoy
+      // llega o pasa la Fecha Fin del registro más reciente de la cadena.
+      casoActual.Estatus = calcularEstatusPorFecha(r.FechaFin);
       casoActual.registros.push(r.ID);
     });
     if(casoActual) casos.push(casoActual);
@@ -896,18 +903,21 @@ function renderTablaIncapacidades(){
   const tbody = document.getElementById('tbodyIncapacidades');
   const filtradas = obtenerIncapacidadesFiltradas();
 
-  tbody.innerHTML = filtradas.map(i => `
+  tbody.innerHTML = filtradas.map(i => {
+    const estatusHoy = calcularEstatusPorFecha(i.FechaFin);
+    return `
     <tr>
       <td>${i.Codigo}</td><td>${i.Nombre}</td><td>${i.Puesto}</td><td>${i.Planta}</td>
       <td>${i.TipoRegistro}</td><td>${i.Incapacidad}</td>
       <td>${i.FechaInicio}</td><td>${i.FechaFin}</td><td>${i.FechaAlta}</td>
       <td>${i.Dias}</td><td>${i.Folio}</td>
-      <td><span class="badge ${i.Estatus==='Activa'?'activa':'cerrada'}">${i.Estatus}</span></td>
+      <td><span class="badge ${estatusHoy==='Activa'?'activa':'cerrada'}">${estatusHoy}</span></td>
       <td>
         <button class="btn chico secundario" onclick="editarIncapacidad('${i.ID}')">✎</button>
         <button class="btn chico peligro" onclick="eliminarIncapacidad('${i.ID}')">✕</button>
       </td>
-    </tr>`).join('') || '<tr><td colspan="13" style="text-align:center;color:#8892a0;">Sin registros</td></tr>';
+    </tr>`;
+  }).join('') || '<tr><td colspan="13" style="text-align:center;color:#8892a0;">Sin registros</td></tr>';
 }
 
 function poblarFiltrosIncapacidades(){
@@ -961,7 +971,7 @@ function editarIncapacidad(id){
   document.getElementById('incapFechaAlta').value = i.FechaAlta;
   document.getElementById('incapDias').value = i.Dias;
   document.getElementById('incapFolio').value = i.Folio;
-  document.getElementById('incapEstatus').value = i.Estatus;
+  document.getElementById('incapEstatus').value = calcularEstatusPorFecha(i.FechaFin);
   document.getElementById('incapTelefono').value = i.Telefono;
   document.getElementById('incapIMSS').value = i.IMSS;
   abrirModal('modalIncapacidad');
