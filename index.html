@@ -335,8 +335,11 @@
   <div class="modal" style="width:420px;">
     <h3>¿Cómo quieres cargar el archivo?</h3>
     <p style="font-size:13px;color:#5b6675;">Se detectaron <b id="txtRegistrosDetectados">0</b> registros en el archivo.</p>
+    <p style="font-size:12.5px;background:#fdecea;border:1px solid #f5c6cb;color:#a94442;padding:8px 10px;border-radius:6px;">
+      ⚠ "Reemplazar todo" <b>borrará permanentemente</b> los <b id="txtRegistrosExistentes">0</b> registros que ya tienes guardados en el sistema, y los sustituirá solo por los de este archivo. Si tu archivo no incluye todos los años/periodos, esos datos se perderán. Usa "Agregar / actualizar existentes" si no quieres perder nada.
+    </p>
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
-      <button class="btn" onclick="confirmarModoCarga('reemplazar')">Reemplazar todo</button>
+      <button class="btn peligro" onclick="confirmarModoCarga('reemplazar')">Reemplazar todo</button>
       <button class="btn secundario" onclick="confirmarModoCarga('agregar')">Agregar / actualizar existentes</button>
       <button class="btn secundario" onclick="cerrarModal('modalModoCarga')">Cancelar</button>
     </div>
@@ -1175,6 +1178,7 @@ async function cargarPlantillaIncapacidades(evento){
     if(!registros.length){ alert('No se detectaron filas válidas en el archivo.'); return; }
     cargaPendiente = {tipo:'incapacidades', registros};
     document.getElementById('txtRegistrosDetectados').textContent = registros.length;
+    document.getElementById('txtRegistrosExistentes').textContent = incapacidades.length;
     abrirModal('modalModoCarga');
   }catch(err){
     console.error(err);
@@ -1240,6 +1244,7 @@ async function cargarCatalogoEmpleados(evento){
     if(!registros.length){ alert('No se detectaron filas válidas. Revisa que exista la columna "Codigo".'); return; }
     cargaPendiente = {tipo:'empleados', registros};
     document.getElementById('txtRegistrosDetectados').textContent = registros.length;
+    document.getElementById('txtRegistrosExistentes').textContent = empleados.length;
     abrirModal('modalModoCarga');
   }catch(err){
     console.error(err);
@@ -1267,6 +1272,11 @@ function filtrarDuplicadosPorFolio(registros, listaExistente){
 async function confirmarModoCarga(modo){
   if(!cargaPendiente) return;
   const {tipo, registros} = cargaPendiente;
+  const existentes = tipo==='incapacidades' ? incapacidades.length : empleados.length;
+  if(modo==='reemplazar' && existentes>0){
+    const ok = confirm(`Esto BORRARÁ los ${existentes} registros que ya tienes guardados y los sustituirá solo por los ${registros.length} de este archivo.\n\n¿Seguro que quieres continuar?`);
+    if(!ok) return;
+  }
   if(tipo==='incapacidades'){
     const listaExistente = modo==='reemplazar' ? [] : incapacidades;
     const {validos, duplicados} = filtrarDuplicadosPorFolio(registros, listaExistente);
