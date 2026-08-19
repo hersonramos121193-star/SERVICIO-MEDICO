@@ -866,7 +866,7 @@ function cruzaDia1(registro, mesesSeleccionados){
   return false;
 }
 
-function renderTablaIncapacidades(){
+function obtenerIncapacidadesFiltradas(){
   const planta = document.getElementById('filtroIncapPlanta').value;
   const ficha = (document.getElementById('filtroIncapFicha').value||'').toLowerCase().trim();
   const nombre = (document.getElementById('filtroIncapNombre').value||'').toLowerCase().trim();
@@ -875,9 +875,8 @@ function renderTablaIncapacidades(){
   const folio = (document.getElementById('filtroIncapFolio').value||'').toLowerCase().trim();
   const anio = document.getElementById('filtroIncapAnio').value;
   const mesesDia1 = Array.from(document.querySelectorAll('.chkDia1:checked')).map(c=>Number(c.value));
-  const tbody = document.getElementById('tbodyIncapacidades');
 
-  const filtradas = incapacidades.filter(i => {
+  return incapacidades.filter(i => {
     if(planta && i.Planta !== planta) return false;
     if(ficha && !String(i.Codigo).toLowerCase().includes(ficha)) return false;
     if(nombre && !String(i.Nombre).toLowerCase().includes(nombre)) return false;
@@ -891,6 +890,11 @@ function renderTablaIncapacidades(){
     if(mesesDia1.length && !cruzaDia1(i, mesesDia1)) return false;
     return true;
   }).sort((a,b)=> (b.FechaInicio||'').localeCompare(a.FechaInicio||''));
+}
+
+function renderTablaIncapacidades(){
+  const tbody = document.getElementById('tbodyIncapacidades');
+  const filtradas = obtenerIncapacidadesFiltradas();
 
   tbody.innerHTML = filtradas.map(i => `
     <tr>
@@ -1012,12 +1016,16 @@ async function eliminarIncapacidad(id){
 /* ============================================================
    TABLA EMPLEADOS
 ============================================================ */
-function renderTablaEmpleados(){
+function obtenerEmpleadosFiltrados(){
   const q = (document.getElementById('buscarEmp').value||'').toLowerCase();
-  const tbody = document.getElementById('tbodyEmpleados');
-  const filtrados = empleados.filter(e =>
+  return empleados.filter(e =>
     !q || [e.Nombre,e.Codigo,e.NSS].join(' ').toLowerCase().includes(q)
   ).sort((a,b)=>a.Nombre.localeCompare(b.Nombre));
+}
+function renderTablaEmpleados(){
+  const tbody = document.getElementById('tbodyEmpleados');
+  const filtrados = obtenerEmpleadosFiltrados();
+
 
   tbody.innerHTML = filtrados.map(e => `
     <tr>
@@ -1279,13 +1287,17 @@ async function confirmarModoCarga(modo){
    EXPORTAR
 ============================================================ */
 function exportarIncapacidadesXlsx(){
-  const ws = XLSX.utils.json_to_sheet(incapacidades);
+  const filtradas = obtenerIncapacidadesFiltradas();
+  if(!filtradas.length){ alert('No hay registros que coincidan con los filtros aplicados.'); return; }
+  const ws = XLSX.utils.json_to_sheet(filtradas);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Incapacidades');
   XLSX.writeFile(wb, 'incapacidades_export.xlsx');
 }
 function exportarEmpleadosXlsx(){
-  const ws = XLSX.utils.json_to_sheet(empleados);
+  const filtrados = obtenerEmpleadosFiltrados();
+  if(!filtrados.length){ alert('No hay registros que coincidan con los filtros aplicados.'); return; }
+  const ws = XLSX.utils.json_to_sheet(filtrados);
   const wb = XLSX.utils.book_new();
   XLSX.utils.book_append_sheet(wb, ws, 'Empleados');
   XLSX.writeFile(wb, 'catalogo_empleados_export.xlsx');
