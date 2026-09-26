@@ -137,3 +137,18 @@
 | B4. Las lecturas (GET) exitosas de datos de salud no quedan en la bitácora | Pendiente. Recomendado para trazabilidad (deber de seguridad, LFPDPPP) |
 | B5. La bitácora no identifica **quién** hizo la acción (solo hay token compartido) | Pendiente. Con despliegue restringido al dominio, se puede usar `Session.getActiveUser()` |
 | B6. El token sigue viajando en la URL del GET (H2) | Pendiente (requiere cambiar frontend y backend a la vez) |
+
+## 8. Estado de correcciones (ronda 2)
+
+| # | Estado | Cambio |
+|---|--------|--------|
+| H2 / B6 | ✅ Corregido | Las lecturas van por POST (`accion:'leer'`) con el token en el cuerpo; `doGet` quedó deshabilitado |
+| H3 | ✅ Corregido | Con backend conectado, la copia local se borra y ya no se escribe. Solo existe en modo sin backend. Si el backend no responde, **no** se muestran copias viejas |
+| H6 | ✅ Corregido | Todo guardado espera la confirmación de Sheets (`ok:true`). Si falla, la pantalla no cambia y el modal queda abierto para reintentar |
+| H6-bis | ✅ Nuevo control | Sin una lectura válida de Sheets, se bloquean las escrituras (evita que una carga "agregar" sobre una lista vacía borre la hoja) |
+| B3 | ✅ Corregido | `FechaCaptura` se conserva en ediciones y cargas; solo los registros nuevos reciben la fecha actual |
+| B4 | ✅ Corregido | Las lecturas exitosas quedan en `Log_Accesos` |
+| H7 | ⚠ Parcial | Con el bloqueo (B2) y la escritura condicionada a la confirmación, ya no se corrompe la hoja, pero las cargas siguen enviando la hoja completa. Si dos usuarios trabajan a la vez, gana el último en guardar. Pendiente: guardar solo los cambios (deltas) |
+| B5 | Pendiente | Identificar al usuario en la bitácora (requiere despliegue restringido al dominio) |
+
+**Compatibilidad:** esta versión del dashboard **no funciona con el `Code.gs` anterior** (lee por POST), y el `Code.gs` nuevo rechaza al dashboard anterior (lee por GET). Deben publicarse juntos.

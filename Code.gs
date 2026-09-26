@@ -4,8 +4,11 @@
  * -------------------------------------------------
  * VERSIÓN CON CONTROL DE ACCESO (TOKEN) + BITÁCORA
  * -------------------------------------------------
- * - Toda petición GET o POST debe incluir el token, o se rechaza sin
- *   tocar las hojas.
+ * - Todas las peticiones van por POST con el token en el cuerpo JSON
+ *   (lecturas: accion='leer'). GET queda deshabilitado para que el token
+ *   no viaje en la URL. Sin token válido se rechaza sin tocar las hojas.
+ * - Las lecturas exitosas también quedan en la bitácora.
+ * - FechaCaptura conserva la fecha original en ediciones y cargas.
  * - La hoja "Log_Accesos" registra cada escritura exitosa y cada intento
  *   rechazado por token inválido.
  * - Las escrituras se serializan con LockService para que dos capturistas
@@ -94,14 +97,17 @@ function respuestaNoAutorizada_(tipo, accion) {
   return respuestaJSON_({ ok: false, error: 'No autorizado' });
 }
 
+/**
+ * Las lecturas ya no se aceptan por GET: el token quedaría en la URL
+ * (historial del navegador, registros de ejecución, proxys). Se leen con
+ * POST { accion: 'leer', tipo: 'todo' | 'incapacidades' | 'empleados', token }.
+ */
 function doGet(e) {
-  const accion = (e.parameter.accion || 'todo');
-  const token = e.parameter.token;
+  registrarAcceso_('GET', (e.parameter.accion || ''), 'RECHAZADO', 'Lectura por GET deshabilitada; usar POST accion=leer');
+  return respuestaJSON_({ ok: false, error: 'Lectura por GET deshabilitada. Actualiza el dashboard.' });
+}
 
-  if (!tokenValido_(token)) {
-    return respuestaNoAutorizada_('GET', accion);
-  }
-
+function leerDatos_(accion) {
   let payload;
   if (accion === 'incapacidades') {
     payload = { incapacidades: leerHoja_(SHEET_INCAPACIDADES, HEADERS_INCAPACIDADES) };
@@ -113,7 +119,7 @@ function doGet(e) {
       empleados: leerHoja_(SHEET_EMPLEADOS, HEADERS_EMPLEADOS)
     };
   }
-  return respuestaJSON_(payload);
+  return payload;
 }
 
 function doPost(e) {
@@ -130,6 +136,19 @@ function doPost(e) {
 
   if (!tokenValido_(token)) {
     return respuestaNoAutorizada_('POST', accion);
+  }
+
+  // Lectura: no necesita bloqueo. Se registra en bitácora (trazabilidad de consultas a datos de salud).
+  if (accion === 'leer') {
+    try {
+      const tipo = body.tipo || 'todo';
+      const payload = leerDatos_(tipo);
+      registrarAcceso_('POST', 'leer', 'OK', 'tipo=' + tipo);
+      return respuestaJSON_(payload);
+    } catch (err) {
+      registrarAcceso_('POST', 'leer', 'ERROR', String(err));
+      return respuestaJSON_({ ok: false, error: String(err) });
+    }
   }
 
   const lock = LockService.getScriptLock();
@@ -205,7 +224,8 @@ function guardarIncapacidades_(registros, modo) {
     limpiarHoja_(hoja, HEADERS_INCAPACIDADES);
   }
   const ahora = new Date();
-  const filas = registros.map(r => HEADERS_INCAPACIDADES.map(h => h === 'FechaCaptura' ? ahora : (r[h] !== undefined ? r[h] : '')));
+  // FechaCaptura: se conserva la original; solo los registros nuevos reciben la fecha actual
+  const filas = registros.map(r => HEADERS_INCAPACIDADES.map(h => h === 'FechaCaptura' ? fechaCaptura_(r[h], ahora) : (r[h] !== undefined ? r[h] : '')));
   if (filas.length) {
     hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, HEADERS_INCAPACIDADES.length).setValues(filas);
   }
@@ -221,6 +241,16 @@ function guardarEmpleados_(registros, modo) {
   if (filas.length) {
     hoja.getRange(hoja.getLastRow() + 1, 1, filas.length, HEADERS_EMPLEADOS.length).setValues(filas);
   }
+}
+
+/**
+ * Convierte la FechaCaptura recibida (llega como texto ISO desde el dashboard)
+ * a Date; si no viene o no es válida, usa el valor por defecto.
+ */
+function fechaCaptura_(valor, porDefecto) {
+  if (!valor) return porDefecto;
+  const d = new Date(valor);
+  return isNaN(d.getTime()) ? porDefecto : d;
 }
 
 function limpiarHoja_(hoja, headers) {
@@ -248,7 +278,7 @@ function upsertFila_(nombreHoja, headers, registro, campoClave) {
   }
 
   const fila = headers.map(h => {
-    if (h === 'FechaCaptura' && !registro[h]) return new Date();
+    if (h === 'FechaCaptura') return fechaCaptura_(registro[h], new Date());
     return registro[h] !== undefined ? registro[h] : '';
   });
 

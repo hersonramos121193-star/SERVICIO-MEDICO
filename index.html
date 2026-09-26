@@ -359,6 +359,7 @@ let tokenAcceso = localStorage.getItem('tokenAppsScript') || '';
 let cargaPendiente = null; // {tipo:'incapacidades'|'empleados', registros:[...]}
 let charts = {};
 let ultimosDatosDashboard = null;
+let lecturaOk = false; // true solo tras leer con éxito de Google Sheets
 
 // Escapa texto antes de insertarlo en HTML (los datos vienen de archivos y de Sheets)
 function esc(v){
@@ -406,11 +407,11 @@ function actualizarEstadoConexion(ok){
   else{ el.textContent = urlScript? 'Error de conexión' : 'Sin conectar a Google Sheets'; el.className='estado-conexion off'; }
 }
 
+// Lectura: va por POST para que el token no quede en la URL (historial, logs, proxys)
 async function apiGet(accion){
   if(!urlScript) return null;
   try{
-    const url = urlScript + '?accion=' + encodeURIComponent(accion) + '&token=' + encodeURIComponent(tokenAcceso);
-    const r = await fetch(url);
+    const r = await fetch(urlScript, {method:'POST', body: JSON.stringify({accion:'leer', tipo: accion, token: tokenAcceso})});
     const j = await r.json();
     if(j && j.ok === false && j.error === 'No autorizado'){
       actualizarEstadoConexion(false);
@@ -433,15 +434,37 @@ async function apiPost(body){
       return null;
     }
     actualizarEstadoConexion(true);
+    if(!j || j.ok !== true){
+      alert('Google Sheets no confirmó el guardado: ' + ((j && j.error) || 'respuesta inesperada') + '\nNo se aplicó el cambio.');
+      return null;
+    }
     return j;
   }catch(err){ actualizarEstadoConexion(false); console.error(err); alert('No se pudo conectar con Google Sheets.'); return null; }
 }
 
+// Guarda en el backend y devuelve true solo si Google Sheets confirmó.
+// Sin backend configurado (modo local) se considera guardado: la copia vive en el navegador.
+async function persistir(body){
+  if(!urlScript) return true;
+  if(!lecturaOk){
+    // sin una lectura válida, la lista en pantalla está vacía y un guardado completo borraría la hoja
+    alert('No se pudieron leer los datos de Google Sheets. Revisa la conexión (⚙) y recarga la página antes de guardar.');
+    return false;
+  }
+  return !!(await apiPost(body));
+}
+
 async function cargarTodo(){
   const datos = await apiGet('todo');
-  if(datos){
+  lecturaOk = !!(datos && Array.isArray(datos.incapacidades) && Array.isArray(datos.empleados));
+  if(lecturaOk){
     incapacidades = (datos.incapacidades||[]).map(normalizarIncap);
     empleados = (datos.empleados||[]).map(normalizarEmp);
+    borrarLocalRespaldo(); // con backend, los datos de salud no se quedan en el navegador
+  } else if(urlScript){
+    // backend configurado pero no respondió: no se muestran copias viejas del navegador
+    incapacidades = [];
+    empleados = [];
   } else {
     // modo local sin backend configurado aún
     incapacidades = JSON.parse(localStorage.getItem('incapacidadesLocal')||'[]').map(normalizarIncap);
@@ -451,8 +474,14 @@ async function cargarTodo(){
 }
 
 function guardarLocalRespaldo(){
+  if(urlScript) return; // solo en modo local; con backend la fuente es Google Sheets
   localStorage.setItem('incapacidadesLocal', JSON.stringify(incapacidades));
   localStorage.setItem('empleadosLocal', JSON.stringify(empleados));
+}
+
+function borrarLocalRespaldo(){
+  localStorage.removeItem('incapacidadesLocal');
+  localStorage.removeItem('empleadosLocal');
 }
 
 /* ============================================================
@@ -485,6 +514,7 @@ function normalizarIncap(r){
     TipoRegistro: r.TipoRegistro||'INICIAL', Incapacidad: (r.Incapacidad||'ENFERMEDAD').toUpperCase(),
     FechaInicio: aFechaISO(r.FechaInicio), FechaFin: fechaFin, FechaAlta: aFechaISO(r.FechaAlta),
     Dias: Number(r.Dias)||0, Folio: r.Folio||'', Telefono: r.Telefono||'', IMSS: r.IMSS||'',
+    FechaCaptura: r.FechaCaptura||'', // la asigna el backend; se conserva en ediciones y cargas
     // Activa mientras no se llegue a la fecha de fin; Cerrada automáticamente al llegar/pasar esa fecha
     Estatus: calcularEstatusPorFecha(fechaFin)
   };
@@ -589,10 +619,10 @@ const MAPA_DEPTO_AREA = {
   '157':'VENTAS PAILERIA','158':'PLANTA 1','159':'VENTAS','160':'VENTAS','161':'PLANTA 2',
   '162':'VENTAS PAILERIA','163':'VENTAS PAILERIA','164':'VENTAS PAILERIA'
 };
-function mapearArea(deptoRaw){
+function mapearArea(deptoRaw, mapa = MAPA_DEPTO_AREA){
   const cod = String(deptoRaw||'').trim().replace(/^0+/,'');
   if(!cod) return '';
-  if(MAPA_DEPTO_AREA[cod]) return MAPA_DEPTO_AREA[cod];
+  if(mapa[cod]) return mapa[cod];
   return '';
 }
 function cargarMapaDeptoAreaGuardado(){
@@ -618,11 +648,13 @@ async function actualizarTablaDeptoArea(evento){
       }
     });
     if(!Object.keys(nuevoMapa).length){ alert('No se detectaron filas válidas (se espera: columna A = DEPTO NOMINA, columna C = AREA).'); return; }
+    const mapaCombinado = {...MAPA_DEPTO_AREA, ...nuevoMapa};
+    // recalcula el área de todo el catálogo actual con la tabla nueva
+    const empleadosNuevos = empleados.map(e => ({...e, Planta: mapearArea(e.Depto, mapaCombinado) || e.Planta}));
+    if(!await persistir({accion:'guardarEmpleados', registros: empleadosNuevos, modo:'reemplazar'})) return;
     Object.assign(MAPA_DEPTO_AREA, nuevoMapa);
     localStorage.setItem('mapaDeptoArea', JSON.stringify(MAPA_DEPTO_AREA));
-    // recalcula el área de todo el catálogo actual con la tabla nueva
-    empleados = empleados.map(e => ({...e, Planta: mapearArea(e.Depto) || e.Planta}));
-    await apiPost({accion:'guardarEmpleados', registros: empleados, modo:'reemplazar'});
+    empleados = empleadosNuevos;
     refrescarTodaLaUI();
     alert(`Tabla depto→área actualizada (${Object.keys(nuevoMapa).length} departamentos). Se recalculó el área de todo el catálogo.`);
   }catch(err){
@@ -1037,16 +1069,17 @@ async function guardarIncapacidad(){
     return;
   }
   const idx = incapacidades.findIndex(x=>x.ID===registro.ID);
+  if(idx>-1) registro.FechaCaptura = incapacidades[idx].FechaCaptura;
+  if(!await persistir({accion:'upsertIncapacidad', registro})) return; // el modal queda abierto para reintentar
   if(idx>-1) incapacidades[idx]=registro; else incapacidades.push(registro);
   cerrarModal('modalIncapacidad');
   refrescarTodaLaUI();
-  await apiPost({accion:'upsertIncapacidad', registro});
 }
 async function eliminarIncapacidad(id){
   if(!confirm('¿Eliminar este registro de incapacidad?')) return;
+  if(!await persistir({accion:'eliminarIncapacidad', id})) return;
   incapacidades = incapacidades.filter(x=>x.ID!==id);
   refrescarTodaLaUI();
-  await apiPost({accion:'eliminarIncapacidad', id});
 }
 
 /* ============================================================
@@ -1118,16 +1151,16 @@ async function guardarEmpleado(){
   });
   if(!registro.Codigo || !registro.Nombre){ alert('Código y nombre son obligatorios.'); return; }
   const idx = empleados.findIndex(x=>x.Codigo===codigoOriginal);
+  if(!await persistir({accion:'upsertEmpleado', registro})) return; // el modal queda abierto para reintentar
   if(idx>-1) empleados[idx]=registro; else empleados.push(registro);
   cerrarModal('modalEmpleado');
   refrescarTodaLaUI();
-  await apiPost({accion:'upsertEmpleado', registro});
 }
 async function eliminarEmpleado(codigo){
   if(!confirm('¿Eliminar este empleado del catálogo?')) return;
+  if(!await persistir({accion:'eliminarEmpleado', codigo})) return;
   empleados = empleados.filter(x=>x.Codigo!==codigo);
   refrescarTodaLaUI();
-  await apiPost({accion:'eliminarEmpleado', codigo});
 }
 
 /* ============================================================
@@ -1303,23 +1336,22 @@ async function confirmarModoCarga(modo){
   if(tipo==='incapacidades'){
     const listaExistente = modo==='reemplazar' ? [] : incapacidades;
     const {validos, duplicados} = filtrarDuplicadosPorFolio(registros, listaExistente);
-    if(modo==='reemplazar') incapacidades = validos;
-    else{
-      validos.forEach(r=>{ incapacidades.push(r); });
-    }
+    const nuevas = modo==='reemplazar' ? validos : [...incapacidades, ...validos];
+    if(!await persistir({accion:'guardarIncapacidades', registros: nuevas, modo:'reemplazar'})) return;
+    incapacidades = nuevas;
     if(duplicados.length){
       alert(`Se detectaron ${duplicados.length} folio(s) duplicado(s) y NO se registraron:\n${duplicados.join(', ')}`);
     }
-    await apiPost({accion:'guardarIncapacidades', registros: modo==='reemplazar'?incapacidades:incapacidades, modo:'reemplazar'});
   } else {
-    if(modo==='reemplazar') empleados = registros;
-    else{
+    const nuevos = modo==='reemplazar' ? registros : [...empleados];
+    if(modo!=='reemplazar'){
       registros.forEach(r=>{
-        const idx = empleados.findIndex(x=>x.Codigo===r.Codigo);
-        if(idx>-1) empleados[idx]=r; else empleados.push(r);
+        const idx = nuevos.findIndex(x=>x.Codigo===r.Codigo);
+        if(idx>-1) nuevos[idx]=r; else nuevos.push(r);
       });
     }
-    await apiPost({accion:'guardarEmpleados', registros: modo==='reemplazar'?registros:empleados, modo:'reemplazar'});
+    if(!await persistir({accion:'guardarEmpleados', registros: nuevos, modo:'reemplazar'})) return;
+    empleados = nuevos;
   }
   cargaPendiente = null;
   cerrarModal('modalModoCarga');
