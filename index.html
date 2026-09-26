@@ -280,15 +280,15 @@
         <select id="incapTipo"><option>ENFERMEDAD</option><option>RIESGO DE TRABAJO</option><option>RIESGO DE TRAYECTO</option><option>MATERNIDAD</option></select></div>
     </div>
     <div class="fila-modal">
-      <div class="campo"><label>Fecha inicio</label><input type="date" id="incapFechaInicio"></div>
-      <div class="campo"><label>Fecha fin</label><input type="date" id="incapFechaFin"></div>
+      <div class="campo"><label>Fecha inicio</label><input type="date" id="incapFechaInicio" onchange="calcularDiasModal()"></div>
+      <div class="campo"><label>Fecha fin</label><input type="date" id="incapFechaFin" onchange="calcularDiasModal()"></div>
     </div>
     <div class="fila-modal">
       <div class="campo"><label>Fecha alta</label><input type="date" id="incapFechaAlta"></div>
-      <div class="campo"><label>Días</label><input type="number" id="incapDias" min="0"></div>
+      <div class="campo"><label>Días (se calculan con las fechas)</label><input type="number" id="incapDias" min="0"></div>
     </div>
     <div class="fila-modal">
-      <div class="campo"><label>Folio</label><input type="text" id="incapFolio"></div>
+      <div class="campo"><label>Folio del certificado IMSS *</label><input type="text" id="incapFolio"></div>
       <div class="campo"><label>Estatus (automático, según Fecha Fin vs. hoy)</label><select id="incapEstatus" disabled><option>Activa</option><option>Cerrada</option></select></div>
     </div>
     <div class="fila-modal">
@@ -521,7 +521,7 @@ function normalizarIncap(r){
   return {
     ID: String(r.ID || ('I'+Date.now()+Math.random().toString(36).slice(2,7))),
     Codigo: r.Codigo||'', Nombre: r.Nombre||'', Puesto: r.Puesto||'', Planta: r.Planta||'',
-    TipoRegistro: r.TipoRegistro||'INICIAL', Incapacidad: (r.Incapacidad||'ENFERMEDAD').toUpperCase(),
+    TipoRegistro: normalizarTipoRegistro(r.TipoRegistro), Incapacidad: normalizarTipoIncap(r.Incapacidad),
     FechaInicio: aFechaISO(r.FechaInicio), FechaFin: fechaFin, FechaAlta: aFechaISO(r.FechaAlta),
     Dias: Number(r.Dias)||0, Folio: String(r.Folio||'').trim(), Telefono: r.Telefono||'', IMSS: r.IMSS||'',
     FechaCaptura: r.FechaCaptura||'', // la asigna el backend; se conserva en ediciones y cargas
@@ -529,10 +529,83 @@ function normalizarIncap(r){
     Estatus: calcularEstatusPorFecha(fechaFin)
   };
 }
+// Unifica variantes de captura ("Enfermedad general", "RT", "Trayecto"...) a los 4 tipos del dashboard.
+// Un valor no reconocido se conserva tal cual para que la validación lo reporte.
+function normalizarTipoIncap(v){
+  const s = String(v||'').toUpperCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').trim();
+  if(!s) return 'ENFERMEDAD';
+  if(s.includes('TRAYECTO')) return 'RIESGO DE TRAYECTO';
+  if(s.includes('MATERN')) return 'MATERNIDAD';
+  if(s.includes('RIESGO') || s.includes('TRABAJO') || s==='RT') return 'RIESGO DE TRABAJO';
+  if(s.includes('ENFERM') || s==='EG') return 'ENFERMEDAD';
+  return s;
+}
+function normalizarTipoRegistro(v){
+  const s = String(v||'').toUpperCase().trim();
+  if(!s || s.startsWith('INI')) return 'INICIAL';
+  if(s.startsWith('SUB')) return 'SUBSECUENTE';
+  return s;
+}
+
+/* ============================================================
+   VALIDACIÓN DE INCAPACIDADES
+   errores: impiden guardar / cargar la fila.
+   avisos:  se informan; el registro se guarda.
+============================================================ */
+const MAX_DIAS_CERTIFICADO = 84; // el certificado individual más largo es el de maternidad (84 días)
+function fechaISOValida(s){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(s||'')) return false;
+  const [y,m,d] = s.split('-').map(Number);
+  const f = new Date(Date.UTC(y,m-1,d));
+  return f.getUTCFullYear()===y && f.getUTCMonth()===m-1 && f.getUTCDate()===d && y>=1990 && y<=2100;
+}
+function diasEntre(ini, fin){
+  return Math.round((new Date(fin+'T00:00:00') - new Date(ini+'T00:00:00'))/86400000) + 1;
+}
+function validarIncap(r){
+  const errores = [], avisos = [];
+  if(!String(r.Nombre||'').trim()) errores.push('falta el nombre');
+  if(!TIPOS_INCAPACIDAD.includes(r.Incapacidad)) errores.push(`tipo de incapacidad no reconocido ("${r.Incapacidad}")`);
+  if(!['INICIAL','SUBSECUENTE'].includes(r.TipoRegistro)) errores.push(`tipo de registro no reconocido ("${r.TipoRegistro}")`);
+  if(!r.FechaInicio) errores.push('falta la fecha de inicio');
+  else if(!fechaISOValida(r.FechaInicio)) errores.push(`fecha de inicio no válida ("${r.FechaInicio}")`);
+  if(r.FechaFin && !fechaISOValida(r.FechaFin)) errores.push(`fecha fin no válida ("${r.FechaFin}")`);
+  if(r.FechaAlta && !fechaISOValida(r.FechaAlta)) avisos.push(`fecha de alta no válida ("${r.FechaAlta}")`);
+  const fechasOk = fechaISOValida(r.FechaInicio) && fechaISOValida(r.FechaFin);
+  if(fechasOk){
+    const rango = diasEntre(r.FechaInicio, r.FechaFin);
+    if(rango < 1) errores.push('la fecha fin es anterior a la fecha de inicio');
+    else {
+      if(!r.Dias) avisos.push(`sin días capturados; se calcularon ${rango} a partir de las fechas`);
+      else if(Number(r.Dias) !== rango) avisos.push(`días capturados (${r.Dias}) no coinciden con las fechas (${rango})`);
+      if(rango > MAX_DIAS_CERTIFICADO) avisos.push(`rango de ${rango} días, inusual para un solo certificado`);
+    }
+  } else if(!r.FechaFin){
+    avisos.push('sin fecha fin');
+  }
+  if(Number(r.Dias) < 0) errores.push('días negativos');
+  if(!r.Folio) avisos.push('sin folio');
+  return {errores, avisos};
+}
+// Si faltan los días y las fechas son válidas, se calculan del rango
+function completarDias(r){
+  if(!r.Dias && fechaISOValida(r.FechaInicio) && fechaISOValida(r.FechaFin)){
+    const rango = diasEntre(r.FechaInicio, r.FechaFin);
+    if(rango >= 1) r.Dias = rango;
+  }
+  return r;
+}
+function calcularDiasModal(){
+  const ini = document.getElementById('incapFechaInicio').value, fin = document.getElementById('incapFechaFin').value;
+  if(fechaISOValida(ini) && fechaISOValida(fin) && diasEntre(ini,fin) >= 1){
+    document.getElementById('incapDias').value = diasEntre(ini,fin);
+  }
+}
+
 function normalizarEmp(r){
   const depto = String(r.Depto||'').trim();
   return {
-    Codigo: String(r.Codigo||''), Nombre: r.Nombre||'', Puesto: r.Puesto||'',
+    Codigo: String(r.Codigo||'').trim(), Nombre: r.Nombre||'', Puesto: r.Puesto||'',
     Depto: depto, Planta: mapearArea(depto) || r.Planta || '',
     NSS: r.NSS||'', Telefono: r.Telefono||'', FechaIngreso: aFechaISO(r.FechaIngreso),
     Estatus: r.Estatus||'Activo', Notas: r.Notas||''
@@ -1129,7 +1202,11 @@ async function guardarIncapacidad(){
     Telefono: document.getElementById('incapTelefono').value,
     IMSS: document.getElementById('incapIMSS').value
   });
-  if(!registro.Nombre){ alert('Captura al menos el nombre del empleado.'); return; }
+  const v = validarIncap(registro);
+  if(!registro.Folio) v.errores.push('el folio del certificado es obligatorio');
+  if(v.errores.length){ alert('No se guardó la incapacidad:\n• ' + v.errores.join('\n• ')); return; }
+  const avisos = v.avisos.filter(a=>a!=='sin folio');
+  if(avisos.length && !confirm('Revisa antes de guardar:\n• ' + avisos.join('\n• ') + '\n\n¿Guardar de todos modos?')) return;
   if(registro.Folio && incapacidades.some(x=>x.ID!==registro.ID && x.Folio && claveIncap(x)===claveIncap(registro))){
     alert(`Ya existe una incapacidad registrada con el folio "${registro.Folio}". No se guardó el duplicado.`);
     return;
@@ -1216,8 +1293,17 @@ async function guardarEmpleado(){
     Notas: document.getElementById('empNotas').value
   });
   if(!registro.Codigo || !registro.Nombre){ alert('Código y nombre son obligatorios.'); return; }
+  const cambioCodigo = codigoOriginal && codigoOriginal !== registro.Codigo;
+  if((!codigoOriginal || cambioCodigo) && empleados.some(x=>x.Codigo===registro.Codigo)){
+    const otro = empleados.find(x=>x.Codigo===registro.Codigo);
+    alert(`El código ${registro.Codigo} ya pertenece a ${otro.Nombre}. No se guardó.`);
+    return;
+  }
   const idx = empleados.findIndex(x=>x.Codigo===codigoOriginal);
   if(!await persistir({accion:'upsertEmpleado', registro})) return; // el modal queda abierto para reintentar
+  if(cambioCodigo && !await persistir({accion:'eliminarEmpleado', codigo: codigoOriginal})){
+    alert(`Se guardó con el código nuevo ${registro.Codigo}, pero no se pudo borrar el registro con el código anterior ${codigoOriginal}. Elimínalo manualmente.`);
+  }
   if(idx>-1) empleados[idx]=registro; else empleados.push(registro);
   cerrarModal('modalEmpleado');
   refrescarTodaLaUI();
@@ -1281,13 +1367,13 @@ async function cargarPlantillaIncapacidades(evento){
   try{
     const wb = await leerArchivoComoWorkbook(file);
     const filas = hojaAJson(wb);
-    const registros = filas.map(f => normalizarIncap({
+    let registros = filas.map(f => normalizarIncap({
       Codigo: campo(f,'Codigo','Código','CVEEMP'),
       Nombre: campo(f,'Nombre'),
       Puesto: campo(f,'Puesto'),
       Planta: campo(f,'Planta'),
-      TipoRegistro: String(campo(f,'Inicial/Subsecuente','TipoRegistro')||'INICIAL').toUpperCase(),
-      Incapacidad: String(campo(f,'Incapacidad')||'ENFERMEDAD').toUpperCase(),
+      TipoRegistro: campo(f,'Inicial/Subsecuente','TipoRegistro'),
+      Incapacidad: campo(f,'Incapacidad','Tipo de incapacidad','Tipo'),
       FechaInicio: campo(f,'Fecha Inicio','FechaInicio'),
       FechaFin: campo(f,'Fecha Fin','FechaFin'),
       FechaAlta: campo(f,'Fecha Alta','FechaAlta'),
@@ -1297,7 +1383,31 @@ async function cargarPlantillaIncapacidades(evento){
       IMSS: campo(f,'IMSS','NSS'),
       Estatus: campo(f,'Estatus')||'Activa'
     }));
-    if(!registros.length){ alert('No se detectaron filas válidas en el archivo.'); return; }
+    // validación fila por fila: las filas con errores no se cargan
+    const validos = [], conError = [], conAviso = [];
+    registros.forEach((r,i)=>{
+      const v = validarIncap(r);
+      const fila = i + 2; // fila 1 = encabezados
+      const ref = `Fila ${fila} · ${r.Codigo||''} ${r.Nombre||''} · folio ${r.Folio||'—'}`;
+      if(v.errores.length){ conError.push({Fila:fila, Codigo:r.Codigo, Nombre:r.Nombre, Folio:r.Folio, Tipo:'ERROR', Detalle:v.errores.join('; ')}); return; }
+      if(v.avisos.length) conAviso.push({Fila:fila, Codigo:r.Codigo, Nombre:r.Nombre, Folio:r.Folio, Tipo:'AVISO', Detalle:v.avisos.join('; ')});
+      validos.push(completarDias(r));
+    });
+    if(conError.length || conAviso.length){
+      const muestra = conError.slice(0,10).map(e=>`Fila ${e.Fila}: ${e.Detalle}`).join('\n');
+      const msg = `Revisión del archivo (${registros.length} filas):\n` +
+        `• Válidas: ${validos.length}\n• Con ERROR (no se cargarán): ${conError.length}\n• Con aviso (sí se cargan): ${conAviso.length}` +
+        (muestra ? `\n\nPrimeros errores:\n${muestra}` : '') +
+        `\n\n¿Descargar el detalle en Excel?`;
+      if(confirm(msg)){
+        const ws = XLSX.utils.json_to_sheet([...conError, ...conAviso]);
+        const wbErr = XLSX.utils.book_new();
+        XLSX.utils.book_append_sheet(wbErr, ws, 'Revision');
+        XLSX.writeFile(wbErr, 'revision_carga_incapacidades.xlsx');
+      }
+    }
+    if(!validos.length){ alert('Ninguna fila del archivo es válida; no hay nada que cargar.'); return; }
+    registros = validos;
     cargaPendiente = {tipo:'incapacidades', registros};
     document.getElementById('txtRegistrosDetectados').textContent = registros.length;
     document.getElementById('txtRegistrosExistentes').textContent = incapacidades.length;
@@ -1352,7 +1462,7 @@ async function cargarCatalogoEmpleados(evento){
       const wb = await leerArchivoComoWorkbook(file);
       filas = hojaAJson(wb);
     }
-    const registros = filas.map(f => normalizarEmp({
+    let registros = filas.map(f => normalizarEmp({
       Codigo: campo(f,'Codigo','Código','CVEEMP'),
       Nombre: campo(f,'Nombre','NOMBRE_COMPLETO'),
       Puesto: campo(f,'Puesto'),
@@ -1364,6 +1474,14 @@ async function cargarCatalogoEmpleados(evento){
       Notas: campo(f,'Notas','EmpObservaciones')
     })).filter(e=>e.Codigo);
     if(!registros.length){ alert('No se detectaron filas válidas. Revisa que exista la columna "Codigo".'); return; }
+    // códigos repetidos dentro del archivo: se conserva la última fila de cada código
+    const porCodigo = new Map();
+    const repetidos = new Set();
+    registros.forEach(r=>{ if(porCodigo.has(r.Codigo)) repetidos.add(r.Codigo); porCodigo.set(r.Codigo, r); });
+    if(repetidos.size){
+      alert(`El archivo trae ${repetidos.size} código(s) repetido(s); se tomará la última fila de cada uno:\n${[...repetidos].slice(0,30).join(', ')}${repetidos.size>30?'…':''}`);
+    }
+    registros = [...porCodigo.values()];
     cargaPendiente = {tipo:'empleados', registros};
     document.getElementById('txtRegistrosDetectados').textContent = registros.length;
     document.getElementById('txtRegistrosExistentes').textContent = empleados.length;
