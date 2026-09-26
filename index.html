@@ -343,6 +343,7 @@
     <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px;">
       <button class="btn peligro" onclick="confirmarModoCarga('reemplazar')">Reemplazar todo</button>
       <button class="btn secundario" onclick="confirmarModoCarga('agregar')">Agregar / actualizar existentes</button>
+      <div style="font-size:11.5px;color:#5b6675;">Incapacidades: se reconocen por <b>Folio</b>; sin folio, por código + fecha de inicio + fecha fin + tipo. Empleados: por <b>Código</b>.</div>
       <button class="btn secundario" onclick="cerrarModal('modalModoCarga')">Cancelar</button>
     </div>
   </div>
@@ -522,7 +523,7 @@ function normalizarIncap(r){
     Codigo: r.Codigo||'', Nombre: r.Nombre||'', Puesto: r.Puesto||'', Planta: r.Planta||'',
     TipoRegistro: r.TipoRegistro||'INICIAL', Incapacidad: (r.Incapacidad||'ENFERMEDAD').toUpperCase(),
     FechaInicio: aFechaISO(r.FechaInicio), FechaFin: fechaFin, FechaAlta: aFechaISO(r.FechaAlta),
-    Dias: Number(r.Dias)||0, Folio: r.Folio||'', Telefono: r.Telefono||'', IMSS: r.IMSS||'',
+    Dias: Number(r.Dias)||0, Folio: String(r.Folio||'').trim(), Telefono: r.Telefono||'', IMSS: r.IMSS||'',
     FechaCaptura: r.FechaCaptura||'', // la asigna el backend; se conserva en ediciones y cargas
     // Activa mientras no se llegue a la fecha de fin; Cerrada automáticamente al llegar/pasar esa fecha
     Estatus: calcularEstatusPorFecha(fechaFin)
@@ -1129,7 +1130,7 @@ async function guardarIncapacidad(){
     IMSS: document.getElementById('incapIMSS').value
   });
   if(!registro.Nombre){ alert('Captura al menos el nombre del empleado.'); return; }
-  if(registro.Folio && incapacidades.some(x=>x.Folio===registro.Folio && x.ID!==registro.ID)){
+  if(registro.Folio && incapacidades.some(x=>x.ID!==registro.ID && x.Folio && claveIncap(x)===claveIncap(registro))){
     alert(`Ya existe una incapacidad registrada con el folio "${registro.Folio}". No se guardó el duplicado.`);
     return;
   }
@@ -1375,19 +1376,45 @@ async function cargarCatalogoEmpleados(evento){
   }
 }
 
-function filtrarDuplicadosPorFolio(registros, listaExistente){
-  const vistos = new Set(listaExistente.filter(x=>x.Folio).map(x=>x.Folio));
-  const validos = [];
-  const duplicados = [];
+/* Clave para reconocer el mismo registro entre el archivo y lo ya guardado:
+   por Folio (el del certificado IMSS); si no tiene folio, por
+   código (o nombre) + fecha de inicio + fecha fin + tipo de incapacidad. */
+function claveIncap(r){
+  const folio = String(r.Folio||'').trim().toUpperCase();
+  if(folio) return 'F|' + folio;
+  const emp = String(r.Codigo||'').trim() || String(r.Nombre||'').trim().toUpperCase();
+  return ['S', emp, r.FechaInicio, r.FechaFin, r.Incapacidad].join('|');
+}
+const CAMPOS_INCAP_COMPARABLES = ['Codigo','Nombre','Puesto','Planta','TipoRegistro','Incapacidad',
+  'FechaInicio','FechaFin','FechaAlta','Dias','Folio','Telefono','IMSS'];
+
+/**
+ * Combina los registros del archivo con la lista existente.
+ * - Mismo registro (claveIncap) ya guardado: se ACTUALIZA conservando su ID y FechaCaptura.
+ * - Registro nuevo: se agrega.
+ * - Repetido dentro del mismo archivo: se toma el primero y se reportan los demás.
+ */
+function combinarIncapacidades(registros, listaExistente){
+  const resultado = listaExistente.map(x=>x);
+  const indice = new Map(resultado.map((x,i)=>[claveIncap(x), i]));
+  const vistosArchivo = new Set();
+  const res = {lista: resultado, nuevos:0, actualizados:0, sinCambios:0, repetidosArchivo:[]};
   registros.forEach(r=>{
-    if(r.Folio && vistos.has(r.Folio)){
-      duplicados.push(r.Folio);
+    const k = claveIncap(r);
+    if(vistosArchivo.has(k)){ res.repetidosArchivo.push(r.Folio || `${r.Codigo||r.Nombre} ${r.FechaInicio}`); return; }
+    vistosArchivo.add(k);
+    if(indice.has(k)){
+      const i = indice.get(k), previo = resultado[i];
+      if(CAMPOS_INCAP_COMPARABLES.every(c => String(previo[c]??'') === String(r[c]??''))){ res.sinCambios++; return; }
+      resultado[i] = {...r, ID: previo.ID, FechaCaptura: previo.FechaCaptura};
+      res.actualizados++;
     } else {
-      if(r.Folio) vistos.add(r.Folio);
-      validos.push(r);
+      indice.set(k, resultado.length);
+      resultado.push(r);
+      res.nuevos++;
     }
   });
-  return {validos, duplicados};
+  return res;
 }
 
 async function confirmarModoCarga(modo){
@@ -1399,14 +1426,15 @@ async function confirmarModoCarga(modo){
     if(!ok) return;
   }
   if(tipo==='incapacidades'){
-    const listaExistente = modo==='reemplazar' ? [] : incapacidades;
-    const {validos, duplicados} = filtrarDuplicadosPorFolio(registros, listaExistente);
-    const nuevas = modo==='reemplazar' ? validos : [...incapacidades, ...validos];
-    if(!await persistir({accion:'guardarIncapacidades', registros: nuevas, modo:'reemplazar'})) return;
-    incapacidades = nuevas;
-    if(duplicados.length){
-      alert(`Se detectaron ${duplicados.length} folio(s) duplicado(s) y NO se registraron:\n${duplicados.join(', ')}`);
+    const c = combinarIncapacidades(registros, modo==='reemplazar' ? [] : incapacidades);
+    if(!await persistir({accion:'guardarIncapacidades', registros: c.lista, modo:'reemplazar'})) return;
+    incapacidades = c.lista;
+    let resumen = `Carga aplicada:\n• Nuevos: ${c.nuevos}`;
+    if(modo!=='reemplazar') resumen += `\n• Actualizados: ${c.actualizados}\n• Sin cambios: ${c.sinCambios}`;
+    if(c.repetidosArchivo.length){
+      resumen += `\n• Repetidos dentro del archivo (NO se registraron): ${c.repetidosArchivo.length}\n  ${c.repetidosArchivo.join(', ')}`;
     }
+    alert(resumen);
   } else {
     const nuevos = modo==='reemplazar' ? registros : [...empleados];
     if(modo!=='reemplazar'){
