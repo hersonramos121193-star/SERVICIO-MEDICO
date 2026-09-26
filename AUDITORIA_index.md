@@ -1,6 +1,6 @@
 # Auditoría técnica — `index.html` (Dashboard Servicio Médico METELMEX)
 
-**Fecha:** 2026-09-26 · **Alcance:** `index.html` (1,355 líneas, frontend completo). **Fuera de alcance:** el backend Apps Script (`Code.gs`), que no está en el repositorio.
+**Fecha:** 2026-09-26 · **Alcance:** `index.html` (frontend) y `Code.gs` (backend Apps Script, agregado al repositorio en la segunda ronda).
 
 **Nomenclatura:** **[H]** es un hecho verificado en el código o por prueba. **[I]** es una interpretación. **[O]** es una opinión técnica.
 
@@ -114,3 +114,26 @@
 - **Carga masiva:** antes de usar "Reemplazar todo", exportar un respaldo. [O] Esa opción debería requerir un respaldo automático previo.
 
 > *Nota:* las citas del RACERF y la numeración de la LFPDPPP 2025 deben verificarse contra el texto vigente del DOF, porque pueden cambiar por reforma.
+
+---
+
+## 7. Estado de correcciones (ronda 1: correcciones rápidas)
+
+| # | Estado | Cambio |
+|---|--------|--------|
+| H1 | ✅ Corregido | `esc()` en todo lo que se inserta con `innerHTML`; los botones usan `data-id` con un solo manejador de clics en lugar de `onclick` armado como texto |
+| H4 | ✅ Corregido | `XLSX.read(..., {raw:true})` en CSV. Probado: `05/03/2024` ahora se lee como 5 de marzo |
+| H5 | ⚠ Parcial | Chart.js ahora carga con firma de integridad (SRI). SheetJS se actualizó a 0.20.3 (`cdn.sheetjs.com`), **pero sin SRI**: el CDN no fue accesible desde el entorno de trabajo para calcular la firma. Está pendiente agregarla, o bien hospedar el archivo junto al HTML |
+| H8 | ✅ Corregido | `fin < hoy`: el día de Fecha Fin la incapacidad sigue "Activa" |
+| H12 | ✅ Corregido | El Excel exportado respeta el filtro de planta en "Incapacidades activas" |
+| — | ✅ Adicional | Los IDs se normalizan a texto (los que vienen de Sheets como número ya no rompen editar y eliminar), y el modo local también pasa por la normalización |
+
+### Backend `Code.gs`
+| Hallazgo | Estado |
+|----------|--------|
+| B1. El token estaba escrito en el código y el repositorio es **público** | ✅ Ahora se lee de *Propiedades de la secuencia de comandos* (`TOKEN_ACCESO`). **El token anterior se compartió fuera de la hoja y debe rotarse** |
+| B2. Sin bloqueo: dos "reemplazar" simultáneos pueden intercalar el borrado y la escritura y dejar la hoja corrupta | ✅ Se agregó `LockService` (espera de 30 s) |
+| B3. `FechaCaptura` se sobrescribe con la fecha actual en cada "reemplazar" y en cada edición, así que se pierde la fecha real de captura | Pendiente (mediano plazo, junto con H6/H7) |
+| B4. Las lecturas (GET) exitosas de datos de salud no quedan en la bitácora | Pendiente. Recomendado para trazabilidad (deber de seguridad, LFPDPPP) |
+| B5. La bitácora no identifica **quién** hizo la acción (solo hay token compartido) | Pendiente. Con despliegue restringido al dominio, se puede usar `Session.getActiveUser()` |
+| B6. El token sigue viajando en la URL del GET (H2) | Pendiente (requiere cambiar frontend y backend a la vez) |

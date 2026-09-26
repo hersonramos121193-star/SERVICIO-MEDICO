@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard Servicio Médico - METELMEX</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js" integrity="sha384-G436+Z2nlA8+PNoeRvWdxKbvOf8E/y+lYxqht2iBwNHTQDV5CJr3+AGVj8fGZi5t" crossorigin="anonymous"></script>
+<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <style>
   :root{
     --azul-1:#1f3b64; --azul-2:#2c4d80; --azul-3:#3f6ba3; --gris:#9aa4b2;
@@ -360,6 +360,11 @@ let cargaPendiente = null; // {tipo:'incapacidades'|'empleados', registros:[...]
 let charts = {};
 let ultimosDatosDashboard = null;
 
+// Escapa texto antes de insertarlo en HTML (los datos vienen de archivos y de Sheets)
+function esc(v){
+  return String(v ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
 function exportarGraficasExcel(){
   if(!ultimosDatosDashboard){ alert('Aún no hay datos calculados en el dashboard.'); return; }
   const d = ultimosDatosDashboard;
@@ -439,8 +444,8 @@ async function cargarTodo(){
     empleados = (datos.empleados||[]).map(normalizarEmp);
   } else {
     // modo local sin backend configurado aún
-    incapacidades = JSON.parse(localStorage.getItem('incapacidadesLocal')||'[]');
-    empleados = JSON.parse(localStorage.getItem('empleadosLocal')||'[]');
+    incapacidades = JSON.parse(localStorage.getItem('incapacidadesLocal')||'[]').map(normalizarIncap);
+    empleados = JSON.parse(localStorage.getItem('empleadosLocal')||'[]').map(normalizarEmp);
   }
   refrescarTodaLaUI();
 }
@@ -470,12 +475,12 @@ function calcularEstatusPorFecha(fechaFin){
   const hoy = new Date(); hoy.setHours(0,0,0,0);
   const fin = new Date(fechaFin+'T00:00:00');
   if(isNaN(fin)) return 'Activa';
-  return fin <= hoy ? 'Cerrada' : 'Activa';
+  return fin < hoy ? 'Cerrada' : 'Activa'; // el día de Fecha Fin aún está incapacitado
 }
 function normalizarIncap(r){
   const fechaFin = aFechaISO(r.FechaFin);
   return {
-    ID: r.ID || ('I'+Date.now()+Math.random().toString(36).slice(2,7)),
+    ID: String(r.ID || ('I'+Date.now()+Math.random().toString(36).slice(2,7))),
     Codigo: r.Codigo||'', Nombre: r.Nombre||'', Puesto: r.Puesto||'', Planta: r.Planta||'',
     TipoRegistro: r.TipoRegistro||'INICIAL', Incapacidad: (r.Incapacidad||'ENFERMEDAD').toUpperCase(),
     FechaInicio: aFechaISO(r.FechaInicio), FechaFin: fechaFin, FechaAlta: aFechaISO(r.FechaAlta),
@@ -543,8 +548,8 @@ function poblarFiltrosAnio(){
   anios.sort();
   const selA = document.getElementById('filtroAnioA'), selB = document.getElementById('filtroAnioB');
   const prevA = selA.value, prevB = selB.value;
-  selA.innerHTML = anios.map(a=>`<option value="${a}">${a}</option>`).join('');
-  selB.innerHTML = anios.map(a=>`<option value="${a}">${a}</option>`).join('');
+  selA.innerHTML = anios.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('');
+  selB.innerHTML = anios.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('');
   selA.value = prevA || anios[anios.length-2] || anios[0];
   selB.value = prevB || anios[anios.length-1];
 }
@@ -552,12 +557,12 @@ function poblarFiltroPlanta(){
   const plantas = [...new Set([...incapacidades.map(i=>i.Planta), ...empleados.map(e=>e.Planta)].filter(Boolean))].sort();
   const sel = document.getElementById('filtroPlanta');
   const prev = sel.value;
-  sel.innerHTML = '<option value="">Todas</option>' + plantas.map(p=>`<option value="${p}">${p}</option>`).join('');
+  sel.innerHTML = '<option value="">Todas</option>' + plantas.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
   sel.value = prev;
 }
 function poblarDatalistCodigos(){
   document.getElementById('listaCodigosEmp').innerHTML =
-    empleados.map(e=>`<option value="${e.Codigo}">${e.Nombre}</option>`).join('');
+    empleados.map(e=>`<option value="${esc(e.Codigo)}">${esc(e.Nombre)}</option>`).join('');
 }
 
 /* ============================================================
@@ -802,7 +807,7 @@ function renderDashboard(){
       {Indicador:'Maternidad', [`Año ${anioA}`]: contarTipoA('MATERNIDAD'), [`Año ${anioB}`]: contarTipo('MATERNIDAD')},
       {Indicador:'Enfermedad general', [`Año ${anioA}`]: contarTipoA('ENFERMEDAD'), [`Año ${anioB}`]: contarTipo('ENFERMEDAD')},
       {Indicador:'Días perdidos', [`Año ${anioA}`]: listaA.reduce((s,i)=>s+(i.Dias||0),0), [`Año ${anioB}`]: listaB.reduce((s,i)=>s+(i.Dias||0),0)},
-      {Indicador:'Incapacidades activas (a la fecha)', [`Año ${anioA}`]:'', [`Año ${anioB}`]: casosGlobal.filter(i=>i.Estatus==='Activa').length},
+      {Indicador:'Incapacidades activas (a la fecha)', [`Año ${anioA}`]:'', [`Año ${anioB}`]: casosGlobal.filter(i=>i.Estatus==='Activa' && (!planta||i.Planta===planta)).length},
       {Indicador:'Empleados activos en catálogo', [`Año ${anioA}`]:'', [`Año ${anioB}`]: empleados.filter(e=>e.Estatus==='Activo').length}
     ],
     porMesRT: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esRT,'casos')[i], [anioB]:serieMensual(listaB,esRT,'casos')[i]})),
@@ -928,14 +933,14 @@ function renderTablaIncapacidades(){
     const estatusHoy = calcularEstatusPorFecha(i.FechaFin);
     return `
     <tr>
-      <td>${i.Codigo}</td><td>${i.Nombre}</td><td>${i.Puesto}</td><td>${i.Planta}</td>
-      <td>${i.TipoRegistro}</td><td>${i.Incapacidad}</td>
-      <td>${i.FechaInicio}</td><td>${i.FechaFin}</td><td>${i.FechaAlta}</td>
-      <td>${i.Dias}</td><td>${i.Folio}</td>
+      <td>${esc(i.Codigo)}</td><td>${esc(i.Nombre)}</td><td>${esc(i.Puesto)}</td><td>${esc(i.Planta)}</td>
+      <td>${esc(i.TipoRegistro)}</td><td>${esc(i.Incapacidad)}</td>
+      <td>${esc(i.FechaInicio)}</td><td>${esc(i.FechaFin)}</td><td>${esc(i.FechaAlta)}</td>
+      <td>${esc(i.Dias)}</td><td>${esc(i.Folio)}</td>
       <td><span class="badge ${estatusHoy==='Activa'?'activa':'cerrada'}">${estatusHoy}</span></td>
       <td>
-        <button class="btn chico secundario" onclick="editarIncapacidad('${i.ID}')">✎</button>
-        <button class="btn chico peligro" onclick="eliminarIncapacidad('${i.ID}')">✕</button>
+        <button class="btn chico secundario" data-accion="editar" data-id="${esc(i.ID)}">✎</button>
+        <button class="btn chico peligro" data-accion="eliminar" data-id="${esc(i.ID)}">✕</button>
       </td>
     </tr>`;
   }).join('') || '<tr><td colspan="13" style="text-align:center;color:#8892a0;">Sin registros</td></tr>';
@@ -949,9 +954,9 @@ function poblarFiltrosIncapacidades(){
   const plantas = [...new Set(incapacidades.map(i=>i.Planta).filter(Boolean))].sort();
   const tipos = [...new Set(incapacidades.map(i=>i.Incapacidad).filter(Boolean))].sort();
   const anios = [...new Set(incapacidades.map(i=>anioDe(i.FechaInicio)).filter(Boolean))].sort();
-  selPlanta.innerHTML = '<option value="">Todas</option>' + plantas.map(p=>`<option value="${p}">${p}</option>`).join('');
-  selTipo.innerHTML = '<option value="">Todos</option>' + tipos.map(t=>`<option value="${t}">${t}</option>`).join('');
-  selAnio.innerHTML = '<option value="">Todos</option>' + anios.map(a=>`<option value="${a}">${a}</option>`).join('');
+  selPlanta.innerHTML = '<option value="">Todas</option>' + plantas.map(p=>`<option value="${esc(p)}">${esc(p)}</option>`).join('');
+  selTipo.innerHTML = '<option value="">Todos</option>' + tipos.map(t=>`<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  selAnio.innerHTML = '<option value="">Todos</option>' + anios.map(a=>`<option value="${esc(a)}">${esc(a)}</option>`).join('');
   selPlanta.value = prevPlanta; selTipo.value = prevTipo; selAnio.value = prevAnio;
 }
 function limpiarFiltrosIncap(){
@@ -1060,12 +1065,12 @@ function renderTablaEmpleados(){
 
   tbody.innerHTML = filtrados.map(e => `
     <tr>
-      <td>${e.Codigo}</td><td>${e.Nombre}</td><td>${e.Puesto}</td><td>${e.Depto}</td><td>${e.Planta}</td>
-      <td>${e.NSS}</td><td>${e.Telefono}</td><td>${e.FechaIngreso}</td>
-      <td><span class="badge ${e.Estatus==='Activo'?'activa':'cerrada'}">${e.Estatus}</span></td>
+      <td>${esc(e.Codigo)}</td><td>${esc(e.Nombre)}</td><td>${esc(e.Puesto)}</td><td>${esc(e.Depto)}</td><td>${esc(e.Planta)}</td>
+      <td>${esc(e.NSS)}</td><td>${esc(e.Telefono)}</td><td>${esc(e.FechaIngreso)}</td>
+      <td><span class="badge ${e.Estatus==='Activo'?'activa':'cerrada'}">${esc(e.Estatus)}</span></td>
       <td>
-        <button class="btn chico secundario" onclick="editarEmpleado('${e.Codigo}')">✎</button>
-        <button class="btn chico peligro" onclick="eliminarEmpleado('${e.Codigo}')">✕</button>
+        <button class="btn chico secundario" data-accion="editar" data-id="${esc(e.Codigo)}">✎</button>
+        <button class="btn chico peligro" data-accion="eliminar" data-id="${esc(e.Codigo)}">✕</button>
       </td>
     </tr>`).join('') || '<tr><td colspan="10" style="text-align:center;color:#8892a0;">Sin registros</td></tr>';
 }
@@ -1160,7 +1165,7 @@ async function leerArchivoComoWorkbook(file){
     return XLSX.utils.table_to_book(tabla, {raw:true});
   }
   if(file.name.toLowerCase().endsWith('.csv')){
-    return XLSX.read(texto, {type:'string'});
+    return XLSX.read(texto, {type:'string', raw:true}); // raw: evita que dd/mm se lea como mm/dd
   }
   const buf = await file.arrayBuffer();
   return XLSX.read(new Uint8Array(buf), {type:'array'});
@@ -1345,6 +1350,16 @@ function exportarEmpleadosXlsx(){
    INICIO
 ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('tbodyIncapacidades').addEventListener('click', ev => {
+    const b = ev.target.closest('button[data-accion]');
+    if(!b) return;
+    if(b.dataset.accion==='editar') editarIncapacidad(b.dataset.id); else eliminarIncapacidad(b.dataset.id);
+  });
+  document.getElementById('tbodyEmpleados').addEventListener('click', ev => {
+    const b = ev.target.closest('button[data-accion]');
+    if(!b) return;
+    if(b.dataset.accion==='editar') editarEmpleado(b.dataset.id); else eliminarEmpleado(b.dataset.id);
+  });
   cargarMapaDeptoAreaGuardado();
   if(!urlScript || !tokenAcceso){ document.getElementById('configBox').classList.remove('oculto'); }
   cargarTodo();
