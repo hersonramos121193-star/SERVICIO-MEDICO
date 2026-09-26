@@ -120,7 +120,7 @@
         <tr><td>Riesgo de trayecto</td><td id="kpiTrayectoA">0</td><td id="kpiTrayecto">0</td></tr>
         <tr><td>Maternidad</td><td id="kpiMaternidadA">0</td><td id="kpiMaternidad">0</td></tr>
         <tr><td>Enfermedad general</td><td id="kpiEnfermedadA">0</td><td id="kpiEnfermedad">0</td></tr>
-        <tr><td>Días perdidos</td><td id="kpiDiasAnioA">0</td><td id="kpiDiasAnio">0</td></tr>
+        <tr><td>Días perdidos (repartidos por mes calendario)</td><td id="kpiDiasAnioA">0</td><td id="kpiDiasAnio">0</td></tr>
       </tbody>
     </table>
   </div>
@@ -716,6 +716,57 @@ const MESES = ['ENERO','FEBRERO','MARZO','ABRIL','MAYO','JUNIO','JULIO','AGOSTO'
    (siguen visibles en la tabla de Incapacidades, solo no se grafican). */
 const PLANTAS_EXCLUIDAS_GRAFICAS = ['FLETES BORJA'];
 
+/* ============================================================
+   DÍAS POR MES CALENDARIO
+   Los días de cada registro se reparten entre los meses/años que realmente
+   cubre [FechaInicio, FechaFin]. Ej.: RT del 20-dic al 15-ene = 12 días en
+   diciembre y 15 en enero (la siniestralidad se mide por año calendario).
+   Si Días no coincide con el rango de fechas, se reparte proporcionalmente
+   conservando el total capturado. Sin Fecha Fin válida: todo al mes de inicio.
+============================================================ */
+const cacheDiasPorMes = new WeakMap();
+function diasPorMes(r){
+  if(cacheDiasPorMes.has(r)) return cacheDiasPorMes.get(r);
+  const res = calcularDiasPorMes(r);
+  cacheDiasPorMes.set(r, res);
+  return res;
+}
+function calcularDiasPorMes(r){
+  const total = Number(r.Dias)||0;
+  if(!total || !r.FechaInicio) return {};
+  const ini = new Date(r.FechaInicio+'T00:00:00');
+  if(isNaN(ini)) return {};
+  const clave = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+  const fin = r.FechaFin ? new Date(r.FechaFin+'T00:00:00') : null;
+  const diasRango = fin && !isNaN(fin) ? Math.round((fin-ini)/86400000)+1 : 0;
+  // rango inválido o absurdo (> 10 años, fecha mal capturada): todo al mes de inicio
+  if(diasRango < 1 || diasRango > 3660) return {[clave(ini)]: total};
+  const cal = {};
+  for(const d = new Date(ini); d <= fin; d.setDate(d.getDate()+1)) cal[clave(d)] = (cal[clave(d)]||0) + 1;
+  if(diasRango === total) return cal;
+  // reparto proporcional por residuo mayor: enteros que suman exactamente el total capturado
+  const partes = Object.entries(cal).map(([k,n]) => { const x = total*n/diasRango; return {k, ent: Math.floor(x), res: x-Math.floor(x)}; });
+  let faltan = total - partes.reduce((s,p)=>s+p.ent,0);
+  [...partes].sort((a,b)=>b.res-a.res).forEach(p=>{ if(faltan>0){ p.ent++; faltan--; } });
+  const out = {};
+  partes.forEach(p=>{ if(p.ent) out[p.k] = p.ent; });
+  return out;
+}
+// suma de días de la lista que caen en el año (y mes 1-12 opcional)
+function sumaDias(lista, anio, mes){
+  const pref = mes ? `${anio}-${String(mes).padStart(2,'0')}` : `${anio}-`;
+  return lista.reduce((s,r)=>{
+    const dm = diasPorMes(r);
+    for(const k in dm) if(mes ? k===pref : k.startsWith(pref)) s += dm[k];
+    return s;
+  },0);
+}
+function aniosConDias(lista){
+  const set = new Set();
+  lista.forEach(r=>Object.keys(diasPorMes(r)).forEach(k=>set.add(Number(k.slice(0,4)))));
+  return [...set].sort();
+}
+
 function renderDashboard(){
   const anioA = Number(document.getElementById('filtroAnioA').value);
   const anioB = Number(document.getElementById('filtroAnioB').value);
@@ -733,17 +784,23 @@ function renderDashboard(){
   const esEnf = t => t === 'ENFERMEDAD' || t === 'MATERNIDAD';
   const esInicial = r => (r.TipoRegistro||'').toUpperCase() === 'INICIAL';
 
-  // "casos" = solo registros INICIAL (1 por caso). "días" = todos los registros
-  // (inicial + subsecuentes), sumados en el mes de cada registro.
+  // "casos" = solo registros INICIAL (1 por caso), en el mes de su fecha de inicio.
   function serieMensual(lista, filtroTipo, campo){
     const arr = new Array(12).fill(0);
-    lista.filter(i=>filtroTipo(i.Incapacidad) && (campo!=='casos' || esInicial(i))).forEach(i=>{
+    lista.filter(i=>filtroTipo(i.Incapacidad) && esInicial(i)).forEach(i=>{
       const mes = anioDe(i.FechaInicio)!==null ? Number(i.FechaInicio.slice(5,7))-1 : null;
       if(mes===null) return;
-      arr[mes] += campo==='dias' ? (i.Dias||0) : 1;
+      arr[mes] += 1;
     });
     return arr;
   }
+  // "días" = todos los registros (inicial + subsecuentes), repartidos por mes calendario;
+  // por eso se parte de la lista completa y no de la filtrada por año de inicio.
+  const baseDias = incapacidadesGraficables.filter(i=>!planta||i.Planta===planta);
+  const serieDias = (anio, filtroTipo) => {
+    const lista = baseDias.filter(i=>filtroTipo(i.Incapacidad));
+    return MESES.map((_,m)=>sumaDias(lista, anio, m+1));
+  };
 
   const listaA = filtrar(incapacidadesGraficables, anioA);
   const listaB = filtrar(incapacidadesGraficables, anioB);
@@ -753,16 +810,16 @@ function renderDashboard(){
     {label:String(anioB), data:serieMensual(listaB, esRT,'casos'), color:'#1f3b64'}
   ]);
   dibujarBarras('chartDiasRT', MESES, [
-    {label:String(anioA), data:serieMensual(listaA, esRT,'dias'), color:'#9aa4b2'},
-    {label:String(anioB), data:serieMensual(listaB, esRT,'dias'), color:'#1f3b64'}
+    {label:String(anioA), data:serieDias(anioA, esRT), color:'#9aa4b2'},
+    {label:String(anioB), data:serieDias(anioB, esRT), color:'#1f3b64'}
   ]);
   dibujarBarras('chartCasosEnf', MESES, [
     {label:String(anioA), data:serieMensual(listaA, esEnf,'casos'), color:'#9aa4b2'},
     {label:String(anioB), data:serieMensual(listaB, esEnf,'casos'), color:'#1f3b64'}
   ]);
   dibujarBarras('chartDiasEnf', MESES, [
-    {label:String(anioA), data:serieMensual(listaA, esEnf,'dias'), color:'#9aa4b2'},
-    {label:String(anioB), data:serieMensual(listaB, esEnf,'dias'), color:'#1f3b64'}
+    {label:String(anioA), data:serieDias(anioA, esEnf), color:'#9aa4b2'},
+    {label:String(anioB), data:serieDias(anioB, esEnf), color:'#1f3b64'}
   ]);
 
   // casos por planta — separado por tipo, año A y año B
@@ -798,11 +855,9 @@ function renderDashboard(){
   dibujarBarrasSimple('chartPorAnio', aniosOrdenados, aniosOrdenados.map(a=>porAnio[a]));
 
   // días perdidos por año, separado por tipo de incapacidad (respeta filtro de planta)
-  const registrosDiasFiltrados = incapacidadesGraficables.filter(i=>!planta||i.Planta===planta);
-  const aniosConDatos = [...new Set(registrosDiasFiltrados.map(i=>anioDe(i.FechaInicio)).filter(Boolean))].sort();
-  dibujarBarrasApiladasPorTipo('chartDiasPorAnio', aniosConDatos,
-    (a,t) => registrosDiasFiltrados.filter(i=>anioDe(i.FechaInicio)===a && i.Incapacidad===t).reduce((s,i)=>s+(i.Dias||0),0)
-  );
+  const aniosConDatos = aniosConDias(baseDias);
+  const diasAnioTipo = (a,t) => sumaDias(baseDias.filter(i=>i.Incapacidad===t), a);
+  dibujarBarrasApiladasPorTipo('chartDiasPorAnio', aniosConDatos, diasAnioTipo);
 
   // casos por mes — comparativo año A vs año B, todos los tipos combinados
   const casosBTodos = filtrar(incapacidadesGraficables, anioB).filter(esInicial);
@@ -830,8 +885,9 @@ function renderDashboard(){
   document.getElementById('kpiMaternidad').textContent = contarTipo('MATERNIDAD');
   document.getElementById('kpiEnfermedadA').textContent = contarTipoA('ENFERMEDAD');
   document.getElementById('kpiEnfermedad').textContent = contarTipo('ENFERMEDAD');
-  document.getElementById('kpiDiasAnioA').textContent = listaA.reduce((s,i)=>s+(i.Dias||0),0);
-  document.getElementById('kpiDiasAnio').textContent = listaB.reduce((s,i)=>s+(i.Dias||0),0);
+  const diasA = sumaDias(baseDias, anioA), diasB = sumaDias(baseDias, anioB);
+  document.getElementById('kpiDiasAnioA').textContent = diasA;
+  document.getElementById('kpiDiasAnio').textContent = diasB;
 
   // KPIs generales (no dependen del año)
   const casosGlobal = calcularCasos(incapacidadesGraficables); // para "activas" sí importa el estatus real de la cadena completa
@@ -847,14 +903,14 @@ function renderDashboard(){
       {Indicador:'Riesgo de trayecto', [`Año ${anioA}`]: contarTipoA('RIESGO DE TRAYECTO'), [`Año ${anioB}`]: contarTipo('RIESGO DE TRAYECTO')},
       {Indicador:'Maternidad', [`Año ${anioA}`]: contarTipoA('MATERNIDAD'), [`Año ${anioB}`]: contarTipo('MATERNIDAD')},
       {Indicador:'Enfermedad general', [`Año ${anioA}`]: contarTipoA('ENFERMEDAD'), [`Año ${anioB}`]: contarTipo('ENFERMEDAD')},
-      {Indicador:'Días perdidos', [`Año ${anioA}`]: listaA.reduce((s,i)=>s+(i.Dias||0),0), [`Año ${anioB}`]: listaB.reduce((s,i)=>s+(i.Dias||0),0)},
+      {Indicador:'Días perdidos (por mes calendario)', [`Año ${anioA}`]: diasA, [`Año ${anioB}`]: diasB},
       {Indicador:'Incapacidades activas (a la fecha)', [`Año ${anioA}`]:'', [`Año ${anioB}`]: casosGlobal.filter(i=>i.Estatus==='Activa' && (!planta||i.Planta===planta)).length},
       {Indicador:'Empleados activos en catálogo', [`Año ${anioA}`]:'', [`Año ${anioB}`]: empleados.filter(e=>e.Estatus==='Activo').length}
     ],
     porMesRT: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esRT,'casos')[i], [anioB]:serieMensual(listaB,esRT,'casos')[i]})),
-    diasMesRT: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esRT,'dias')[i], [anioB]:serieMensual(listaB,esRT,'dias')[i]})),
+    diasMesRT: (()=>{ const a=serieDias(anioA,esRT), b=serieDias(anioB,esRT); return MESES.map((m,i)=>({Mes:m, [anioA]:a[i], [anioB]:b[i]})); })(),
     porMesEnf: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esEnf,'casos')[i], [anioB]:serieMensual(listaB,esEnf,'casos')[i]})),
-    diasMesEnf: MESES.map((m,i)=>({Mes:m, [anioA]:serieMensual(listaA,esEnf,'dias')[i], [anioB]:serieMensual(listaB,esEnf,'dias')[i]})),
+    diasMesEnf: (()=>{ const a=serieDias(anioA,esEnf), b=serieDias(anioB,esEnf); return MESES.map((m,i)=>({Mes:m, [anioA]:a[i], [anioB]:b[i]})); })(),
     porPlantaA: plantasListA.map(p => {
       const fila = {Planta:p};
       TIPOS_INCAPACIDAD.forEach(t => fila[t] = casosA_INICIAL.filter(i=>(i.Planta||'Sin planta')===p && i.Incapacidad===t).length);
@@ -872,7 +928,7 @@ function renderDashboard(){
     porAnio: aniosOrdenados.map(a=>({Año:a, Casos:porAnio[a]})),
     diasPorAnio: aniosConDatos.map(a => {
       const fila = {Año:a};
-      TIPOS_INCAPACIDAD.forEach(t => fila[t] = registrosDiasFiltrados.filter(i=>anioDe(i.FechaInicio)===a && i.Incapacidad===t).reduce((s,i)=>s+(i.Dias||0),0));
+      TIPOS_INCAPACIDAD.forEach(t => fila[t] = diasAnioTipo(a,t));
       return fila;
     }),
     porMesTotal: MESES.map((m,i)=>({Mes:m, [anioA]:porMesA[i], [anioB]:porMesB[i]}))
