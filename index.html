@@ -413,14 +413,23 @@ async function apiGet(accion){
   try{
     const r = await fetch(urlScript, {method:'POST', body: JSON.stringify({accion:'leer', tipo: accion, token: tokenAcceso})});
     const j = await r.json();
-    if(j && j.ok === false && j.error === 'No autorizado'){
+    if(j && j.ok === false){
       actualizarEstadoConexion(false);
-      console.error('Token de acceso inválido o ausente. Revisa la configuración (⚙).');
+      const detalle = j.error === 'No autorizado'
+        ? 'Token de acceso inválido o ausente. Revisa la configuración (⚙).'
+        : /no reconocida/i.test(j.error||'')
+          ? 'El Apps Script publicado es una versión anterior. En Apps Script: Implementar > Gestionar implementaciones > editar > Nueva versión.'
+          : (j.error || 'Error desconocido');
+      alert('Google Sheets respondió con error al leer los datos:\n' + detalle);
       return null;
     }
     actualizarEstadoConexion(true);
     return j;
-  }catch(err){ actualizarEstadoConexion(false); console.error(err); return null; }
+  }catch(err){
+    actualizarEstadoConexion(false); console.error(err);
+    alert('No se pudo conectar con Google Sheets. Revisa la URL del Apps Script (⚙) y que la implementación permita el acceso.');
+    return null;
+  }
 }
 async function apiPost(body){
   if(!urlScript){ alert('Primero configura la URL de Apps Script (⚙ Configuración).'); return null; }
