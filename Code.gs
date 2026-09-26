@@ -28,7 +28,9 @@
  * -------------------------------------------------
  * INSTALACIÓN:
  * 1. Extensiones > Apps Script > pega este archivo completo.
- * 2. Crea la propiedad TOKEN_ACCESO (ver arriba).
+ * 2. Selecciona la función `generarNuevoToken` y pulsa Ejecutar: crea el
+ *    token, lo guarda en TOKEN_ACCESO y lo muestra en el Registro de
+ *    ejecución para copiarlo al dashboard (⚙ Configuración).
  * 3. Ejecuta `inicializarHojas` una vez y autoriza permisos.
  * 4. Implementar > Gestionar implementaciones > editar > Nueva versión
  *    (así se conserva la misma URL /exec).
@@ -67,6 +69,21 @@ function crearHojaSiNoExiste_(ss, nombre, headers) {
     hoja.setFrozenRows(1);
   }
   return hoja;
+}
+
+/**
+ * Genera un token aleatorio nuevo (64 caracteres hexadecimales, dos UUID v4)
+ * y lo guarda en la propiedad TOKEN_ACCESO, reemplazando el anterior.
+ * Ejecútala desde el editor: el token solo aparece en TU Registro de ejecución.
+ * Al ejecutarla, el token previo deja de funcionar de inmediato: captura el
+ * nuevo en el dashboard (⚙ Configuración) de cada equipo autorizado.
+ */
+function generarNuevoToken() {
+  const token = (Utilities.getUuid() + Utilities.getUuid()).replace(/-/g, '');
+  PropertiesService.getScriptProperties().setProperty('TOKEN_ACCESO', token);
+  registrarAcceso_('ADMIN', 'generarNuevoToken', 'OK', 'Token rotado');
+  Logger.log('Nuevo TOKEN_ACCESO (cópialo al dashboard y no lo compartas por chat ni correo):');
+  Logger.log(token);
 }
 
 /**
