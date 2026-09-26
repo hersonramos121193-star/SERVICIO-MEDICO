@@ -152,3 +152,12 @@
 | B5 | Pendiente | Identificar al usuario en la bitácora (requiere despliegue restringido al dominio) |
 
 **Compatibilidad:** esta versión del dashboard **no funciona con el `Code.gs` anterior** (lee por POST), y el `Code.gs` nuevo rechaza al dashboard anterior (lee por GET). Deben publicarse juntos.
+
+## 9. Estado de correcciones (ronda 3)
+
+| # | Estado | Cambio |
+|---|--------|--------|
+| — | ✅ Corregido (PR #2) | Un error del backend al leer ya no se muestra como "Conectado"; aparece la causa y la solución |
+| H9 | ✅ Corregido | Los días de cada registro se reparten entre los meses y años calendario que cubre `[FechaInicio, FechaFin]`. Si Días no coincide con el rango, se reparte en proporción y se conserva el total capturado. Sin Fecha Fin válida (o con un rango mayor a 10 años), todo va al mes de inicio. Los **casos** se siguen contando en el mes de su fecha de inicio (registro INICIAL) |
+
+**Impacto en los indicadores:** a partir de esta versión, los "Días perdidos" de cada año pueden cambiar respecto a los reportes anteriores. Las incapacidades que cruzan de año pasan una parte de sus días al año siguiente. El total histórico no cambia. Esto alinea el dashboard con el periodo anual de la siniestralidad (LSS art. 72; revisión anual, LSS art. 74).
