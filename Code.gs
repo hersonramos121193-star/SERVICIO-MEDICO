@@ -175,6 +175,30 @@ function doPost(e) {
   }
 
   try {
+    // Reemplazo completo: si el dashboard informa cuántos registros veía (conteoPrevio) y la hoja
+    // ya no tiene esa cantidad, alguien más capturó en medio: se rechaza para no borrar su trabajo.
+    if ((accion === 'guardarIncapacidades' || accion === 'guardarEmpleados') && body.conteoPrevio !== undefined) {
+      const hojaObjetivo = accion === 'guardarIncapacidades' ? SHEET_INCAPACIDADES : SHEET_EMPLEADOS;
+      const headersObjetivo = accion === 'guardarIncapacidades' ? HEADERS_INCAPACIDADES : HEADERS_EMPLEADOS;
+      const actual = leerHoja_(hojaObjetivo, headersObjetivo).length;
+      if (actual !== Number(body.conteoPrevio)) {
+        registrarAcceso_('POST', accion, 'RECHAZADO', 'Hoja modificada por otro usuario: esperados=' + body.conteoPrevio + ', actuales=' + actual);
+        return respuestaJSON_({ ok: false, error: 'La hoja cambió desde que abriste el dashboard (otra persona capturó). Recarga la página (Ctrl+F5) y vuelve a intentar.' });
+      }
+    }
+
+    if (accion === 'upsertIncapacidades') {
+      const r = upsertFilas_(SHEET_INCAPACIDADES, HEADERS_INCAPACIDADES, body.registros || [], 'ID');
+      registrarAcceso_('POST', accion, 'OK', r.actualizados + ' actualizados, ' + r.nuevos + ' nuevos');
+      return respuestaJSON_({ ok: true, actualizados: r.actualizados, nuevos: r.nuevos });
+    }
+
+    if (accion === 'upsertEmpleados') {
+      const r = upsertFilas_(SHEET_EMPLEADOS, HEADERS_EMPLEADOS, body.registros || [], 'Codigo');
+      registrarAcceso_('POST', accion, 'OK', r.actualizados + ' actualizados, ' + r.nuevos + ' nuevos');
+      return respuestaJSON_({ ok: true, actualizados: r.actualizados, nuevos: r.nuevos });
+    }
+
     if (accion === 'guardarIncapacidades') {
       guardarIncapacidades_(body.registros, body.modo || 'reemplazar');
       registrarAcceso_('POST', accion, 'OK', (body.registros || []).length + ' registros, modo=' + (body.modo || 'reemplazar'));
@@ -275,6 +299,53 @@ function limpiarHoja_(hoja, headers) {
   if (ultimaFila > 1) {
     hoja.getRange(2, 1, ultimaFila - 1, headers.length).clearContent();
   }
+}
+
+/**
+ * Upsert por lote: solo toca los registros recibidos. Lee la hoja una vez (bajo el
+ * bloqueo de doPost), actualiza en memoria las filas cuya clave coincide, las escribe
+ * en una sola operación y agrega al final las nuevas. Las filas que otros usuarios
+ * capturaron y que no vienen en el lote quedan intactas.
+ */
+function upsertFilas_(nombreHoja, headers, registros, campoClave) {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const hoja = crearHojaSiNoExiste_(ss, nombreHoja, headers);
+  const idxClave = headers.indexOf(campoClave);
+  const ultimaFila = hoja.getLastRow();
+  const datos = ultimaFila >= 2 ? hoja.getRange(2, 1, ultimaFila - 1, headers.length).getValues() : [];
+  const posicion = new Map();
+  datos.forEach((fila, i) => { const k = String(fila[idxClave]); if (k !== '') posicion.set(k, i); });
+
+  const ahora = new Date();
+  const aFila = r => headers.map(h => {
+    if (h === 'FechaCaptura') return fechaCaptura_(r[h], ahora);
+    return r[h] !== undefined ? r[h] : '';
+  });
+
+  const nuevas = [];
+  const posicionNueva = new Map(); // clave -> índice en `nuevas` (si el lote repite una clave, gana la última)
+  const actualizadas = new Set();
+  registros.forEach(r => {
+    const k = String(r[campoClave]);
+    if (posicion.has(k)) {
+      datos[posicion.get(k)] = aFila(r);
+      actualizadas.add(k);
+    } else if (posicionNueva.has(k)) {
+      nuevas[posicionNueva.get(k)] = aFila(r);
+    } else {
+      posicionNueva.set(k, nuevas.length);
+      nuevas.push(aFila(r));
+    }
+  });
+  const actualizados = actualizadas.size;
+
+  if (actualizados && datos.length) {
+    hoja.getRange(2, 1, datos.length, headers.length).setValues(datos);
+  }
+  if (nuevas.length) {
+    hoja.getRange(hoja.getLastRow() + 1, 1, nuevas.length, headers.length).setValues(nuevas);
+  }
+  return { actualizados: actualizados, nuevos: nuevas.length };
 }
 
 function upsertFila_(nombreHoja, headers, registro, campoClave) {
