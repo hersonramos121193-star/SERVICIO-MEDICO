@@ -6,10 +6,12 @@
 <title>Dashboard Servicio Médico - METELMEX</title>
 <!-- Librerías hospedadas junto al dashboard (sin depender de un CDN externo).
      vendor/chart.umd.js = Chart.js 4.4.4 oficial (sha384-G436+Z2nlA8+PNoeRvWdxKbvOf8E/y+lYxqht2iBwNHTQDV5CJr3+AGVj8fGZi5t).
-     vendor/xlsx.full.min.js = SheetJS 0.20.3 oficial, descargado de cdn.sheetjs.com. Si aún no existe
-     en el repositorio, se usa el CDN oficial como respaldo. -->
+     vendor/xlsx.full.min.js = SheetJS 0.20.3 oficial, descargado de cdn.sheetjs.com
+     (sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT).
+     Si el archivo falta o no coincide con la firma, se usa el CDN oficial como respaldo.
+     Al actualizar cualquiera de las dos librerías hay que actualizar también su integrity. -->
 <script src="vendor/chart.umd.js" integrity="sha384-G436+Z2nlA8+PNoeRvWdxKbvOf8E/y+lYxqht2iBwNHTQDV5CJr3+AGVj8fGZi5t"></script>
-<script src="vendor/xlsx.full.min.js"></script>
+<script src="vendor/xlsx.full.min.js" integrity="sha384-EnyY0/GSHQGSxSgMwaIPzSESbqoOLSexfnSMN2AP+39Ckmn92stwABZynq1JyzdT"></script>
 <script>
   if(!window.XLSX){
     document.write('<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"><\/script>');
