@@ -4,8 +4,17 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Dashboard Servicio Médico - METELMEX</title>
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.js" integrity="sha384-G436+Z2nlA8+PNoeRvWdxKbvOf8E/y+lYxqht2iBwNHTQDV5CJr3+AGVj8fGZi5t" crossorigin="anonymous"></script>
-<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+<!-- Librerías hospedadas junto al dashboard (sin depender de un CDN externo).
+     vendor/chart.umd.js = Chart.js 4.4.4 oficial (sha384-G436+Z2nlA8+PNoeRvWdxKbvOf8E/y+lYxqht2iBwNHTQDV5CJr3+AGVj8fGZi5t).
+     vendor/xlsx.full.min.js = SheetJS 0.20.3 oficial, descargado de cdn.sheetjs.com. Si aún no existe
+     en el repositorio, se usa el CDN oficial como respaldo. -->
+<script src="vendor/chart.umd.js" integrity="sha384-G436+Z2nlA8+PNoeRvWdxKbvOf8E/y+lYxqht2iBwNHTQDV5CJr3+AGVj8fGZi5t"></script>
+<script src="vendor/xlsx.full.min.js"></script>
+<script>
+  if(!window.XLSX){
+    document.write('<script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"><\/script>');
+  }
+</script>
 <style>
   :root{
     --azul-1:#1f3b64; --azul-2:#2c4d80; --azul-3:#3f6ba3; --gris:#9aa4b2;
@@ -734,12 +743,14 @@ async function actualizarTablaDeptoArea(evento){
     const mapaCombinado = {...MAPA_DEPTO_AREA, ...nuevoMapa};
     // recalcula el área de todo el catálogo actual con la tabla nueva
     const empleadosNuevos = empleados.map(e => ({...e, Planta: mapearArea(e.Depto, mapaCombinado) || e.Planta}));
-    if(!await persistir({accion:'guardarEmpleados', registros: empleadosNuevos, modo:'reemplazar'})) return;
+    // solo se envían los empleados cuya área cambió
+    const cambiados = empleadosNuevos.filter((e,i) => e.Planta !== empleados[i].Planta);
+    if(cambiados.length && !await persistir({accion:'upsertEmpleados', registros: cambiados})) return;
     Object.assign(MAPA_DEPTO_AREA, nuevoMapa);
     localStorage.setItem('mapaDeptoArea', JSON.stringify(MAPA_DEPTO_AREA));
     empleados = empleadosNuevos;
-    refrescarTodaLaUI();
-    alert(`Tabla depto→área actualizada (${Object.keys(nuevoMapa).length} departamentos). Se recalculó el área de todo el catálogo.`);
+    await sincronizarConSheets();
+    alert(`Tabla depto→área actualizada (${Object.keys(nuevoMapa).length} departamentos). Empleados con área modificada: ${cambiados.length}.`);
   }catch(err){
     console.error(err);
     alert('No se pudo leer el archivo de zonas.');
@@ -1516,7 +1527,7 @@ function combinarIncapacidades(registros, listaExistente){
   const resultado = listaExistente.map(x=>x);
   const indice = new Map(resultado.map((x,i)=>[claveIncap(x), i]));
   const vistosArchivo = new Set();
-  const res = {lista: resultado, nuevos:0, actualizados:0, sinCambios:0, repetidosArchivo:[]};
+  const res = {lista: resultado, cambios: [], nuevos:0, actualizados:0, sinCambios:0, repetidosArchivo:[]};
   registros.forEach(r=>{
     const k = claveIncap(r);
     if(vistosArchivo.has(k)){ res.repetidosArchivo.push(r.Folio || `${r.Codigo||r.Nombre} ${r.FechaInicio}`); return; }
@@ -1525,10 +1536,12 @@ function combinarIncapacidades(registros, listaExistente){
       const i = indice.get(k), previo = resultado[i];
       if(CAMPOS_INCAP_COMPARABLES.every(c => String(previo[c]??'') === String(r[c]??''))){ res.sinCambios++; return; }
       resultado[i] = {...r, ID: previo.ID, FechaCaptura: previo.FechaCaptura};
+      res.cambios.push(resultado[i]);
       res.actualizados++;
     } else {
       indice.set(k, resultado.length);
       resultado.push(r);
+      res.cambios.push(r);
       res.nuevos++;
     }
   });
@@ -1545,7 +1558,12 @@ async function confirmarModoCarga(modo){
   }
   if(tipo==='incapacidades'){
     const c = combinarIncapacidades(registros, modo==='reemplazar' ? [] : incapacidades);
-    if(!await persistir({accion:'guardarIncapacidades', registros: c.lista, modo:'reemplazar'})) return;
+    // "agregar": solo se envían los registros nuevos o modificados; lo que otros capturaron queda intacto.
+    // "reemplazar": se envía todo, y el backend lo rechaza si la hoja cambió desde la última lectura.
+    const cuerpo = modo==='reemplazar'
+      ? {accion:'guardarIncapacidades', registros: c.lista, modo:'reemplazar', conteoPrevio: incapacidades.length}
+      : {accion:'upsertIncapacidades', registros: c.cambios};
+    if(cuerpo.registros.length && !await persistir(cuerpo)) return;
     incapacidades = c.lista;
     let resumen = `Carga aplicada:\n• Nuevos: ${c.nuevos}`;
     if(modo!=='reemplazar') resumen += `\n• Actualizados: ${c.actualizados}\n• Sin cambios: ${c.sinCambios}`;
@@ -1555,18 +1573,34 @@ async function confirmarModoCarga(modo){
     alert(resumen);
   } else {
     const nuevos = modo==='reemplazar' ? registros : [...empleados];
+    const cambios = [];
     if(modo!=='reemplazar'){
       registros.forEach(r=>{
         const idx = nuevos.findIndex(x=>x.Codigo===r.Codigo);
-        if(idx>-1) nuevos[idx]=r; else nuevos.push(r);
+        if(idx>-1){
+          if(JSON.stringify(nuevos[idx]) === JSON.stringify(r)) return; // sin cambios
+          nuevos[idx]=r;
+        } else nuevos.push(r);
+        cambios.push(r);
       });
     }
-    if(!await persistir({accion:'guardarEmpleados', registros: nuevos, modo:'reemplazar'})) return;
+    const cuerpo = modo==='reemplazar'
+      ? {accion:'guardarEmpleados', registros: nuevos, modo:'reemplazar', conteoPrevio: empleados.length}
+      : {accion:'upsertEmpleados', registros: cambios};
+    if(cuerpo.registros.length && !await persistir(cuerpo)) return;
     empleados = nuevos;
+    if(modo!=='reemplazar') alert(`Catálogo actualizado:\n• Nuevos o modificados: ${cambios.length}\n• Sin cambios: ${registros.length - cambios.length}`);
   }
   cargaPendiente = null;
   cerrarModal('modalModoCarga');
-  refrescarTodaLaUI();
+  await sincronizarConSheets();
+}
+
+// Tras una carga masiva se vuelve a leer Google Sheets: la pantalla refleja lo que quedó
+// realmente guardado, incluidas las capturas que otros usuarios hicieron en paralelo.
+async function sincronizarConSheets(){
+  if(urlScript) await cargarTodo();
+  else refrescarTodaLaUI();
 }
 
 /* ============================================================
@@ -1593,6 +1627,9 @@ function exportarEmpleadosXlsx(){
    INICIO
 ============================================================ */
 window.addEventListener('DOMContentLoaded', () => {
+  if(window.XLSX && String(XLSX.version).localeCompare('0.20.2', undefined, {numeric:true}) < 0){
+    console.warn(`SheetJS ${XLSX.version} tiene vulnerabilidades conocidas (CVE-2023-30533, CVE-2024-22363). Sube la versión oficial 0.20.3 a vendor/xlsx.full.min.js.`);
+  }
   document.getElementById('tbodyIncapacidades').addEventListener('click', ev => {
     const b = ev.target.closest('button[data-accion]');
     if(!b) return;
