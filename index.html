@@ -405,8 +405,25 @@ function abrirConfig(){
   document.getElementById('inputUrlScript').value = urlScript;
   document.getElementById('inputTokenScript').value = tokenAcceso;
 }
+/* Deja la URL del Apps Script en su forma canónica. Variantes como /macros/u/1/s/…,
+   http://, una "/" final o parámetros después de /exec provocan que Google redirija
+   la petición; en la redirección el POST se convierte en GET y se pierde el token. */
+function normalizarUrlScript(u){
+  let url = String(u||'').replace(/\s+/g,'');
+  url = url.replace(/^http:\/\//i, 'https://');
+  url = url.replace(/\/macros\/u\/\d+\//, '/macros/');
+  const m = url.match(/^(https:\/\/script\.google\.com\/(?:a\/macros\/[^\/]+|macros)\/s\/[A-Za-z0-9_-]+\/exec)/);
+  return m ? m[1] : null;
+}
 function guardarUrlScript(){
-  urlScript = document.getElementById('inputUrlScript').value.trim();
+  const capturada = document.getElementById('inputUrlScript').value.trim();
+  const normalizada = normalizarUrlScript(capturada);
+  if(!normalizada){
+    alert('La URL no tiene el formato esperado:\nhttps://script.google.com/macros/s/…/exec\n\nCópiala de Apps Script: Implementar > Gestionar implementaciones > URL de la aplicación web.');
+    return;
+  }
+  document.getElementById('inputUrlScript').value = normalizada;
+  urlScript = normalizada;
   tokenAcceso = document.getElementById('inputTokenScript').value.trim();
   localStorage.setItem('urlAppsScript', urlScript);
   localStorage.setItem('tokenAppsScript', tokenAcceso);
@@ -429,6 +446,11 @@ async function apiGet(accion){
       actualizarEstadoConexion(false);
       const detalle = j.error === 'No autorizado'
         ? 'Token de acceso inválido o ausente. Revisa la configuración (⚙).'
+        : /GET deshabilitada/i.test(j.error||'')
+          ? 'Google redirigió la petición y llegó sin datos (POST convertido en GET).\n\n' +
+            'Causas comunes en este equipo:\n' +
+            '1) Hay varias cuentas de Google abiertas en el navegador. Prueba en una ventana de incógnito, o cierra sesión de las demás cuentas.\n' +
+            '2) La URL en ⚙ Configuración no es la exacta. Debe ser https://script.google.com/macros/s/…/exec (sin /u/1/ ni texto después de /exec). Vuelve a pegarla y guarda.'
         : /no reconocida/i.test(j.error||'')
           ? 'El Apps Script publicado es una versión anterior. En Apps Script: Implementar > Gestionar implementaciones > editar > Nueva versión.'
           : (j.error || 'Error desconocido');
@@ -1643,6 +1665,11 @@ window.addEventListener('DOMContentLoaded', () => {
     if(b.dataset.accion==='editar') editarEmpleado(b.dataset.id); else eliminarEmpleado(b.dataset.id);
   });
   cargarMapaDeptoAreaGuardado();
+  // corrige URLs guardadas antes de existir la normalización
+  if(urlScript){
+    const n = normalizarUrlScript(urlScript);
+    if(n && n !== urlScript){ urlScript = n; try{ localStorage.setItem('urlAppsScript', n); }catch(e){} }
+  }
   if(!urlScript || !tokenAcceso){ document.getElementById('configBox').classList.remove('oculto'); }
   cargarTodo();
 });
